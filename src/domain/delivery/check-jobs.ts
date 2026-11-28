@@ -1,13 +1,17 @@
 /**
  * check-jobs.ts — the one list `checks` is made of, and the two spellings it replaced.
  *
- * Every entry is a `domain/delivery/declared-jobs.ts` list entry, and which list an
- * entry sits in no longer decides anything: a check's commands come from the default
- * branch whether or not it names a credential, so the tree is the same tree and the
- * only thing that differs is whether the job has any place to put one.
+ * Every entry is a `domain/delivery/declared-jobs.ts` list entry. What an entry names
+ * no longer chooses a LIST — there is one — it chooses a JOB, and the two jobs differ
+ * in one thing: where the pull request is.
  *
- * The rule is a sentence, and it is the design: **the machinery reads the default
- * branch; a pull request's tree is data.** A pull request cannot add a check, rename
+ * An entry that names no secret runs in the pull request's tree, executing the change
+ * in place, with no secret slot in the job at all. An entry that names one runs in the
+ * default branch's tree and reads the pull request at `$ATOMATON_PR_TREE`, so a relative
+ * path in its commands is a file a person released rather than one the change wrote.
+ *
+ * The rule underneath is a sentence: **the list and the commands are the default
+ * branch's; a pull request's tree is data.** A pull request cannot add a check, rename
  * one, or widen the secrets one receives, because the list it could edit is not the
  * list that runs. That is what makes an entry naming `secrets` safe anywhere in it.
  *
@@ -25,7 +29,8 @@ import { CHECK_JOB_RESERVED } from "./declared-secrets.ts";
  * The list of checks.
  *
  * Read from the default branch, always — the planning job checks that branch out and
- * nothing reads a pull request's copy — so an entry may name its own `secrets`.
+ * nothing reads a pull request's copy — so an entry may name its own `secrets`, and the
+ * job that takes it runs in the default branch's tree.
  */
 export const CHECKS: DeclaredJobsRules = { where: "checks.jobs", secrets: CHECK_JOB_RESERVED };
 

@@ -18,18 +18,27 @@ checks:
     - name: integration
       secrets: [STAGING_TOKEN]
       commands:
-        - ./scripts/check-against-staging.sh
+        - ./scripts/check-against-staging.sh "$ATOMATON_PR_TREE"
 ```
 
 `name` is the job's name, and `commands` run in order until one fails. `secrets`
 names repository secrets; add the secret to the repository first, because the
 entry names it and does not create it.
 
-The pull request is the job's working tree, so the script reads the change in
-place — no path to it is passed. It is worth knowing what that means: the code
-under test is in the same job as the credential. Keep an entry that names a
-secret to talking to something outside the repository, and let the entry that
-runs the project's own tests name none. [A check that needs a
+## The tree the commands run in
+
+An entry that names a secret runs in your **default branch's tree**, not the pull
+request's. `./scripts/check-against-staging.sh` is the file that is already merged,
+and the change under test cannot replace it — which is what keeps a credential out
+of reach of code the pull request wrote.
+
+The pull request is passed instead, as a path at `$ATOMATON_PR_TREE`. Read it; do
+not execute it. Everything about the change is there — the files it touched, the
+diff it makes — and none of it runs in this job.
+
+An entry that names no secret is the other way round: the pull request IS its
+working tree, so `bun test` reads the change in place with no credential in reach.
+That is where a check that executes the change belongs. [A check that needs a
 credential](../boundaries.md#a-check-that-needs-a-credential) is the reasoning.
 
 ## The credential belongs to that entry

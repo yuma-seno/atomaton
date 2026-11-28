@@ -11,7 +11,8 @@
  * ## What decides whether an entry may name a credential
  *
  * The tree the LIST is read from, and that is deliberately not a property of this
- * module. `checks` is read from the default branch; `deploy` from the branch or tag it
+ * module. `checks` is read from the default branch, and the job an entry with a
+ * credential lands in runs in that same tree; `deploy` is read from the branch or tag it
  * ships, after the merge. Neither is the change under review, so a credential named
  * beside an entry is safe in both -- and the question this module used to answer, which
  * arm may hold a key, went with the arms.

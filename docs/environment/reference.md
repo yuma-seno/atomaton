@@ -24,8 +24,10 @@ and a test that passes for the agent and fails in CI reaches an engineer as a
 defect that does not reproduce on the machine they can see.
 
 A check that adds a dependency to the pull request therefore needs nothing
-special: this step runs before its commands, in the pull request's tree, from the
-default branch's `setup_commands`.
+special: this step runs before its commands, from the default branch's
+`setup_commands`, in whichever tree those commands will run in — the pull
+request's for an entry that names no secret, the default branch's for one that
+does.
 
 This key is for the project. What a tool server of **yours** needs installed goes
 in [`tools.packages`](../tools/reference.md#toolspackages) instead.

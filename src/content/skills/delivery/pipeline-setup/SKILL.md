@@ -144,7 +144,7 @@ checks:
   jobs:
     - name: cloud-names
       secrets: ["AWS_ROLE_ARN"]
-      commands: ["./scripts/check-env-names.sh"]
+      commands: ["./scripts/check-env-names.sh \"$ATOMATON_PR_TREE\""]
 deploy:
   on_tag:
     - name: production
@@ -163,11 +163,16 @@ request cannot add one, rename one, or widen one — it cannot edit the list tha
 reading it. An entry that names none runs in a job with no secret slots in it at
 all, not empty ones.
 
-The thing to be careful about is what else is in that job: the pull request is the
-working tree, so a credentialed entry whose commands build or test the change puts
-a credential in the environment of code the change wrote. Keep the entry that runs
-the project's tests free of `secrets`, and let a credentialed one talk to the
-service it needs.
+**An entry that names a secret runs in your default branch's tree.** A relative
+path in its commands is the file you released, not the one the pull request wrote —
+so `./scripts/check-env-names.sh` is safe to write there, and a change cannot reach
+the credential by editing that file. The pull request arrives beside it as a path
+at `$ATOMATON_PR_TREE`: read it, and do not execute it.
+
+An entry that names **no** secret is the other way round — the pull request is its
+working tree, so `bun test` reads the change in place with no credential in reach.
+That is where a check that runs the project's own code belongs, which is why most
+entries say nothing about secrets at all.
 
 **`tools.secrets` needs a second step, and the others do not.** Naming a secret
 there authorises the run to hold it; it does not deliver it to any tool. The tool

@@ -39,12 +39,21 @@ Each entry becomes its own job. An entry that names `secrets` is handed those an
 no others; an entry that names none runs in a job with nowhere to put one, which
 is the ordinary case and the reason saying nothing is worth preferring.
 
-**The commands come from your default branch, and the tree under test is the pull
-request's.** The pull request is the job's working tree, so a command reads it in
-place; `checks` is read from the default branch. So a pull request cannot add a
-check, rename one, or widen the secrets one receives — which is what makes a
-credential safe on any entry here. See
-[what a check may reach](boundaries.md#a-check-that-needs-a-credential).
+**The commands come from your default branch.** So a pull request cannot add a
+check, rename one, or widen the secrets one receives — it cannot edit the list
+that is reading it.
+
+Where the pull request is depends on which kind of entry it is, and that is the
+one thing the two jobs differ on:
+
+- An entry that names **no** secret runs in the pull request's tree, so a command
+  like `bun test` reads the change in place. That is the ordinary check.
+- An entry that names a **secret** runs in the default branch's tree, and the pull
+  request is a path to read at `$ATOMATON_PR_TREE`. So `./scripts/x.sh` in one of
+  its commands is the file you released, not the one the pull request wrote — which
+  is what keeps a credential out of reach of the change under test.
+
+See [what a check may reach](boundaries.md#a-check-that-needs-a-credential).
 
 **It ships with one entry**, a gitleaks scan, which is the template's only
 default check. It is safe to inherit on a repository with years of history

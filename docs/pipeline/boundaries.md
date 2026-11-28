@@ -14,25 +14,27 @@ something else. An entry that names none runs in a job with no secret slots in i
 at all — not empty ones — so "this check cannot reach a credential" is a property
 of the workflow rather than of today's configuration.
 
-**The pull request is the working tree.** Every check runs with the pull request
-checked out, reading it in place. This is the one thing that was stronger before
-the list was unified: a check that named a credential used to run in the default
-branch's tree with the pull request beside it, and now it runs in the pull
-request's. So a credentialed entry whose commands compile or test the change puts
-a credential in the environment of code the change wrote.
+**A credentialed check runs in the default branch's tree.** That is the one place
+the two kinds of entry differ, and it is the difference that matters: a relative
+path in a credentialed entry — `./scripts/check-cloud.sh` — resolves to the file a
+person released, never to whatever the pull request put at that path. So a change
+cannot reach a credential by editing one file; the commands holding it are ones
+that were already reviewed and merged.
 
-Nothing mechanical enforces the difference, and it did not before either — an
-interpreter reads a file rather than executing it, but nothing stopped
-`bash "$ATOMATON_PR_TREE/x.sh"` when that path existed. It rests on how the entry
-is written, which is why it is worth writing patiently:
+**The pull request arrives as data.** `$ATOMATON_PR_TREE` is a path to a checkout
+of it. Read it; do not execute it. That is the same rule the check on the
+deliverable holds itself to, and nothing mechanical enforces it here — an
+interpreter reads a file rather than executing it, so no filesystem flag will stop
+`bash "$ATOMATON_PR_TREE/x.sh"`. It rests on review, which is why this list is
+meant to stay short.
 
-- An entry that runs the project's own tests names **no** secret. It is the
-  ordinary entry, and its job has nowhere to put one.
-- An entry that names a secret is for talking to something outside the repository
-  — a service, a registry, a cloud account — and is worth keeping to that.
+An entry that names no secret is the other way round: the pull request is its
+working tree, so its commands run against the change in place — that is the point
+of a check — and there is no credential in the job for the code it runs to read.
 
-A check that needs both at once belongs after the merge, or wants a credential you
-would not mind losing.
+A check that genuinely needs both at once — integration tests against a real
+environment, say — belongs after the merge, or wants a credential you would not
+mind losing.
 
 The other direction is worth knowing: a tool that needs a credential you would
 rather not route into an agent's environment can be a step in `checks.jobs`

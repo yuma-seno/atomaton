@@ -5,6 +5,7 @@ import { COMMANDS_VAR, matrixJob, matrixSecretEnv, RUN_DECLARED_COMMANDS } from 
 import { MACHINERY_ROOT, scriptCommand } from "./actions/script-call.ts";
 import { ATOMA_DEFAULT_VERSION, installAtomaCliStep } from "./actions/atoma-cli.ts";
 import { renameSecretSlots } from "./actions/secret-slots.ts";
+import { PR_TREE_VAR } from "../domain/delivery/declared-secrets.ts";
 import { SetupBunAction } from "./actions/third-party.ts";
 import { environmentSetupStep } from "./actions/environment-setup.ts";
 import { MACHINERY_ROOT_VAR } from "../domain/machinery/machinery-layout.ts";
@@ -27,17 +28,22 @@ import { ref as planChecksRef } from "../entrypoints/machinery/plan_checks.ts";
 //
 // ## One list, read from the default branch, run in two kinds of job
 //
-// The commands always come from the default branch. The planning job checks that
-// branch out and reads `checks` from it, and each check runs in the pull request's
-// tree. Nothing here DECIDES anything from that tree, which is what a pull request
-// cannot change: it cannot add a check, rename one, or widen the secrets one
-// receives.
+// The commands always come from the default branch, and nothing here DECIDES anything
+// from the pull request's tree: a pull request cannot add a check, rename one, or
+// widen the secrets one receives. What that tree IS depends on what the entry named,
+// and the two paragraphs below are the whole of the difference.
 //
-// An entry that named `secrets` becomes a job in `credentialled-checks`, holding the
-// ones that entry named and no others. An entry that named none becomes a job in
-// `checks`, whose step has nowhere to put a credential at all -- not an empty slot
-// list, which is a fact about today's configuration rather than a property of the
-// workflow. See `runWithoutCredentials`.
+// An entry that named none becomes a job in `checks`: the pull request is its working
+// tree, so a command reads the change in place, and its step has nowhere to put a
+// credential at all -- not an empty slot list, which is a fact about today's
+// configuration rather than a property of the workflow. See `runWithoutCredentials`.
+//
+// An entry that named `secrets` becomes a job in `credentialled-checks`, and there the
+// working tree is the DEFAULT BRANCH and the pull request is a path to read at
+// `$ATOMATON_PR_TREE`. The asymmetry is the whole of the rule: a credential beside a
+// command means that command must be one a person released, so `./scripts/x.sh`
+// resolves to the released file rather than to whatever the pull request put at that
+// path. An entry that wants to execute the change is an entry that names no secret.
 //
 // ## Two triggers, because the two kinds of pull request arrive differently
 //
@@ -73,6 +79,8 @@ const SPLIT_STEP_ID = "split";
 
 /** Where the machinery is checked out, before it is moved out of the work tree. */
 const MACHINERY_DIR = "atomaton-machinery";
+/** Where the pull request is put for a credentialed check's commands to read. */
+const PR_TREE_DIR = ".atomaton-pull-request";
 /** Where it ends up: outside the work tree, so a project's own commands cannot see it. */
 const MACHINERY_ABS = "\${RUNNER_TEMP}/atomaton-machinery";
 
@@ -180,6 +188,10 @@ const planChecksJob = new DefinedJob<{ uncredentialled: string; credentialled: s
  * `environment.setup_commands` are read from and where the tool servers' own files
  * live. This is the shape `atomaton-runner` already had for the same reason.
  *
+ * It is not used by `credentialled-checks`, which needs no second checkout: there the
+ * default branch IS the working tree, and an unset `ATOMATON_MACHINERY_ROOT` resolves
+ * to it.
+ *
  * Straight back out of the work tree, as the runner does: `actions/checkout` cannot
  * write outside `GITHUB_WORKSPACE`, and a project's own commands (`git status`, a
  * linter run over `.`) must see the repository and nothing else.
@@ -232,13 +244,21 @@ function runWithoutCredentials() {
   });
 }
 
-/** An entry that named secrets, handed those and no others. */
+/**
+ * An entry that named secrets, handed those and no others.
+ *
+ * Its commands run in the default branch's tree, which is why a relative path in one of
+ * them cannot be a file the pull request wrote. The pull request is here instead — as a
+ * path, `$ATOMATON_PR_TREE`, under the same rule `validate_deliverable.ts` states about
+ * `--root`: data, never code.
+ */
 function runCredentialledChecks() {
   return new TypedOutputsStep({
     name: "Run this check's commands",
     shell: "bash",
     env: {
       ...matrixSecretEnv(),
+      [PR_TREE_VAR]: `\${{ github.workspace }}/${PR_TREE_DIR}`,
       ...CHECK_ENV,
     },
     run: renameSecretSlots() + "\n" + RUN_DECLARED_COMMANDS,
@@ -266,17 +286,24 @@ const checksJob = matrixJob(
 );
 
 /**
- * The checks that named secrets: the same shape, plus the credentials their own entry
- * declared. What they run is decided by the default branch like every other entry, so
- * the tree under test is the pull request's and the commands are not.
+ * The checks that named secrets: the default branch's tree, plus the credentials their
+ * own entry declared.
+ *
+ * The tree is the difference, and it is the one that matters. Commands here resolve
+ * against what a person released, so a pull request editing `scripts/check-cloud.sh`
+ * cannot have that edit run with a credential in the environment; the pull request is
+ * checked out beside them as data and named by `$ATOMATON_PR_TREE`.
  */
 const credentialledChecksJob = matrixJob(
   CREDENTIALLED_CHECKS_JOB_NAME,
   planChecksJob,
   { ...CHECK_MATRIX, output: "credentialled" },
   [
-    new ActionsCheckoutV4({ name: "Checkout the pull request" }),
-    ...machinerySteps(),
+    new ActionsCheckoutV4({
+      name: "Checkout the default branch, whose commands these are",
+      with: { ref: "${{ github.event.repository.default_branch }}" },
+    }),
+    new ActionsCheckoutV4({ name: "Checkout the pull request, as data", with: { path: PR_TREE_DIR } }),
     new SetupBunAction({ name: "Setup Bun" }),
     environmentSetupStep(),
     runCredentialledChecks(),

@@ -277,14 +277,24 @@ export const TOOL_SECRETS: SecretDestination = {
 const JOB_ENV: readonly string[] = ["ATOMATON_COMMANDS", "GH_TOKEN"];
 
 /**
+ * Where a credentialed check's job puts the pull request for its commands to read.
+ *
+ * There rather than in a working directory, because the two are different claims: the
+ * default branch is the tree those commands run in, and the pull request is data
+ * beside it. Spelled once, here, and imported by the workflow that sets it.
+ */
+export const PR_TREE_VAR = "ATOMATON_PR_TREE";
+
+/**
  * Names a CHECK's environment already uses.
  *
- * `ATOMATON_MACHINERY_ROOT` is where the default branch's checkout is put, and the
- * setup step and every machinery script read it. Shadowing it would point a check at a
- * tree of the declaration's choosing, and the check would report on something other
- * than the change.
+ * Two job shapes take one list, so two names: `ATOMATON_MACHINERY_ROOT` in the job
+ * whose working tree is the pull request, and `ATOMATON_PR_TREE` in the job whose
+ * working tree is the default branch. A declaration shadowing either would point the
+ * check at a tree of its own choosing, and the check would report on something other
+ * than the change under test.
  */
-export const CHECK_JOB_RESERVED: ReadonlySet<string> = new Set([...JOB_ENV, MACHINERY_ROOT_VAR]);
+export const CHECK_JOB_RESERVED: ReadonlySet<string> = new Set([...JOB_ENV, MACHINERY_ROOT_VAR, PR_TREE_VAR]);
 
 /**
  * Names a DEPLOYMENT's environment already uses.

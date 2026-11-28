@@ -30,9 +30,12 @@
  *                      agent reviewing it is set up.
  *   checks, tools      the default branch. The commands come from there because a
  *                      pull request must not choose what runs, and the setup is part
- *                      of what runs: an entry that added a dependency in the pull
- *                      request's tree would otherwise install it before the same
- *                      commands were allowed to use it.
+ *                      of what runs: an entry that added a dependency would otherwise
+ *                      install it into a tree the commands are not allowed to use.
+ *                      The one job that works IN the pull request -- the checks that
+ *                      named no secret -- points the variable at a second checkout
+ *                      instead, so the setup it runs is still the released one while
+ *                      the commands it precedes see the change.
  *   deployment         the tag or the default branch, both of them post-merge.
  *
  * ## No credentials

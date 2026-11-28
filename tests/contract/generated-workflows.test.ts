@@ -2275,7 +2275,13 @@ describe("generated workflows", () => {
  * pull request could then add a job, give it a secret, and be handed it.
  */
 describe("atomaton-check reads the machinery, never the pull request", () => {
-  type Step = { name?: string; run?: string; with?: Record<string, string>; env?: Record<string, string> };
+  type Step = {
+    name?: string;
+    run?: string;
+    uses?: string;
+    with?: Record<string, string>;
+    env?: Record<string, string>;
+  };
   type Document = { jobs?: Record<string, { steps?: Step[]; outputs?: Record<string, string> }> };
 
   const CHECK = "dist/.github/workflows/atomaton-check.yml";
@@ -2292,11 +2298,11 @@ describe("atomaton-check reads the machinery, never the pull request", () => {
     return stepsOf(job).find((step) => step.with?.path === "atomaton-machinery");
   }
 
-  // (a) Every job that runs a project's commands has the machinery beside it, and
-  // says where it is. Without this the setup step would read the pull request's
+  // (a) Every job whose working tree is the pull request has the machinery beside it,
+  // and says where it is. Without this the setup step would read the pull request's
   // `config.yaml`, which is the change under test deciding how it is set up.
-  test("every job that runs project commands sets the machinery root", () => {
-    for (const job of ["checks", "credentialled-checks", "atomaton-tools"]) {
+  test("every job that works in the pull request sets the machinery root", () => {
+    for (const job of ["checks", "atomaton-tools"]) {
       const checkout = machineryCheckout(job);
       expect(checkout, `${job}: a checkout into atomaton-machinery`).toBeDefined();
       expect(checkout?.with?.ref, `${job}: the machinery must be the default branch`).toContain("default_branch");
@@ -2329,6 +2335,40 @@ describe("atomaton-check reads the machinery, never the pull request", () => {
     for (const step of steps) {
       expect(step.with?.path, `${step.name}: the plan job checks nothing out beside it`).toBeUndefined();
     }
+  });
+
+  // (b2) A credentialed check runs in the DEFAULT BRANCH's tree, and sees the pull
+  // request only at a path.
+  //
+  // This is the boundary the unified list could have quietly lost: with the pull
+  // request as the working tree, `./scripts/check-cloud.sh` in a credentialed entry
+  // resolves to whatever the pull request put at that path, and runs it with the
+  // credential in the environment. A pull request could then read the secret by
+  // editing one file. So the tree those commands run in is what a person released,
+  // and the change under test arrives as data with a name.
+  test("a credentialed check's commands resolve against the default branch, not the pull request", () => {
+    const checkouts = stepsOf("credentialled-checks").filter((step) => step.uses?.startsWith("actions/checkout"));
+    expect(checkouts, "two checkouts: the tree the commands run in, and the data").toHaveLength(2);
+
+    // The one WITHOUT a `path` is the working tree, and it is the default branch.
+    const worktree = checkouts.filter((step) => step.with?.path === undefined);
+    expect(worktree, "exactly one checkout is the working tree").toHaveLength(1);
+    expect(worktree[0]?.with?.ref, "and it is the default branch").toContain("default_branch");
+
+    // The pull request goes somewhere else, and only its path reaches the commands.
+    const data = checkouts.filter((step) => step.with?.path !== undefined);
+    expect(data, "exactly one checkout is the pull request").toHaveLength(1);
+    const prDir = data[0]?.with?.path as string;
+    expect(prDir, "and it is not the workspace root").not.toBe(".");
+    expect(data[0]?.with?.ref, "the pull request's own ref, not the default branch").toBeUndefined();
+
+    const carrier = stepsOf("credentialled-checks").find((step) => step.name === "Run this check's commands");
+    expect(carrier?.env?.ATOMATON_PR_TREE, "the commands are handed it under its own name").toBe(
+      `\${{ github.workspace }}/${prDir}`,
+    );
+    // And nothing points the job's own machinery at the pull request.
+    expect(carrier?.env?.ATOMATON_MACHINERY_ROOT, "the machinery root is unset, so `.` is the default branch")
+      .toBeUndefined();
   });
 
   // (c) The check that named no secret runs in a step with no slots in it at all --
