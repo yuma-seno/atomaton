@@ -213,13 +213,9 @@ or opening the file with the shell. Loading one counts toward no operational lim
 irrelevant when the run started becomes relevant the moment the work reaches it,
 and by then nothing will remind you but this sentence.
 
-Writing for a person — a report, a question, a handoff, a sub-issue body — is done
-in the thread's language: the one the message that carries this run's work is
-written in — the issue or pull request the run is on, or the comment that hands the
-work over. A thread that continues the work in another language carries that one
-forward. The language follows the thread, never the model's own default. In a
-language the catalog has a writing skill for, load the skill first — the skill
-shapes the sentences.
+Writing for a person — a report, a question, a handoff — in a language the catalog
+has a writing skill for? Load it first, and write in the thread's language: the
+skill shapes the sentences.
 
 {{AVAILABLE_SKILLS}}
 
