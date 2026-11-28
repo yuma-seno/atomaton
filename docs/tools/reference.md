@@ -65,8 +65,9 @@ What each server's tools do in a run is in
 [searching your repository's issues](how-it-works/searching-the-issues.md) and
 [reading the web](how-it-works/reading-the-web.md).
 
-`files` gives `read` an `offset` and a `limit` in lines, and a result that
-stopped early names the offset to continue from. `read` also returns a picture as
+`files` gives `read` an `offset` and a `limit` in lines, and the same range written
+into `path` itself (`src/x.ts:120-260`, one argument rather than three); a result
+that stopped early names the path to continue from. `read` also returns a picture as
 a picture, so an agent whose definition sets
 [`vision: true`](../agents/reference.md#vision) can look at a screenshot in the
 repository; one without it gets a note saying the picture was withheld. `grep`

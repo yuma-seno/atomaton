@@ -4474,11 +4474,58 @@ describe("mcp/files.ts", () => {
     expect(text).toContain("lines 5-14 of 40");
     expect(text).toContain("5\tline 5");
     expect(text).toContain("offset: 15");
-    // The continuation is one argument added to the call the caller just made. The
-    // marker spells that out for the recorded failure -- #607 and #627 -- whose
-    // transcripts show a caller repeating a call unchanged while believing it had
-    // already passed the offset it meant to.
-    expect(text).toContain("The same call and the same arguments, plus this one.");
+    // The continuation, in the one argument a call is sure to carry. Every recorded
+    // failure of this marker -- #607, #627, #644, #658 -- is a call whose second
+    // argument never reached the server, so the marker names a `path` first and the
+    // added `offset` second.
+    expect(text).toContain('read(path: "big.txt:15")');
+  });
+
+  /**
+   * The range a caller can always write, because it is the argument it always sends.
+   * On #658's reviewer run the offset it meant to pass was absent from the recorded
+   * call 11 reads out of 11, and the file was then unreadable past its first chunk.
+   */
+  test("a read takes its range from the path, so one argument is enough", async () => {
+    const root = fixture({ "big.txt": NUMBERED });
+    const both = (await call(root, "read", { path: "big.txt:5-14" })).result.content[0].text;
+    expect(both).toContain("lines 5-14 of 40");
+    expect(both).toContain("5\tline 5");
+    expect(both).toContain("14\tline 14");
+
+    // One line means "from here on": the same bound as `offset`, so a file is paged by
+    // naming the line each time rather than by promising the end of it.
+    const open = (await call(root, "read", { path: "big.txt:20" })).result.content[0].text;
+    expect(open).toContain("lines 20-40 of 40");
+  });
+
+  test("an open-ended range stops where one read stops, and names what continues it", async () => {
+    const long = Array.from({ length: 900 }, (_, i) => `line ${i + 1}`).join("\n");
+    const root = fixture({ "long.txt": long });
+    const text = (await call(root, "read", { path: "long.txt:20" })).result.content[0].text;
+    expect(text).toContain(" of 900");
+    expect(text).not.toContain("900\tline 900");
+    expect(text).toContain('Continue with read(path: "long.txt:');
+  });
+
+  test("an offset and limit passed as arguments still win over the range in the path", async () => {
+    const root = fixture({ "big.txt": NUMBERED });
+    const text = (await call(root, "read", { path: "big.txt:5-14", limit: 2 })).result.content[0].text;
+    expect(text).toContain("lines 5-6 of 40");
+  });
+
+  test("a file whose name holds a colon is read as named, not as a range", async () => {
+    const root = fixture({ "odd:12": "colon in the name\n" });
+    const text = (await call(root, "read", { path: "odd:12" })).result.content[0].text;
+    expect(text).toContain("colon in the name");
+    expect(text).toContain("lines 1-1 of 1");
+  });
+
+  test("a range that ends before it starts is an error naming the range", async () => {
+    const root = fixture({ "big.txt": NUMBERED });
+    const r = await call(root, "read", { path: "big.txt:20-10" });
+    expect(r.result.isError).toBe(true);
+    expect(r.result.content[0].text).toContain("is not a range");
   });
 
   test("a read that reaches the end says nothing about continuing", async () => {
