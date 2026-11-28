@@ -28630,28 +28630,29 @@
   {
     "path": "sessions/issue-653/engineer.json",
     "agent": "engineer",
-    "messages": 278,
-    "calls": 140,
-    "failed": 1,
+    "messages": 193,
+    "calls": 90,
+    "failed": 0,
     "refused": 0,
     "skills": [
       "japanese"
     ],
-    "reported": false,
+    "reported": true,
     "tools": {
-      "bash": 125,
-      "write": 5,
-      "edit": 3,
-      "read": 1,
+      "bash": 76,
+      "write": 3,
+      "read": 2,
       "get_issue": 1,
       "load_skill": 1,
       "get_issue_comments": 2,
-      "commit_and_push": 1,
-      "create_pr": 1
+      "commit_and_push": 2,
+      "create_pr": 1,
+      "get_check_runs": 1,
+      "check_merge_readiness": 1
     },
     "acts": {
-      "other": 115,
-      "edit": 10
+      "edit": 7,
+      "other": 69
     },
     "runs": [
       {
@@ -28679,6 +28680,29 @@
           }
         },
         "started": "2026-11-28T09:43:10Z"
+      },
+      {
+        "compactions": 1,
+        "ended": "2026-11-28T10:07:01Z",
+        "ended_because": "completed",
+        "iterations": 20,
+        "loop_recoveries": 0,
+        "messages": 193,
+        "seconds": 241,
+        "server_calls": {
+          "files": {
+            "read": 1
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "commit_and_push": 1,
+            "get_check_runs": 1
+          },
+          "shell": {
+            "bash": 15
+          }
+        },
+        "started": "2026-11-28T10:03:00Z"
       }
     ]
   },
@@ -31873,6 +31897,61 @@
           }
         },
         "started": "2026-11-27T11:08:26Z"
+      }
+    ]
+  },
+  {
+    "path": "sessions/pr-654/archive/engineer-1.json",
+    "agent": "engineer",
+    "messages": 288,
+    "calls": 140,
+    "failed": 1,
+    "refused": 0,
+    "skills": [
+      "japanese"
+    ],
+    "reported": false,
+    "tools": {
+      "bash": 125,
+      "write": 5,
+      "edit": 3,
+      "read": 1,
+      "get_issue": 1,
+      "load_skill": 1,
+      "get_issue_comments": 2,
+      "commit_and_push": 1,
+      "create_pr": 1
+    },
+    "acts": {
+      "other": 115,
+      "edit": 10
+    },
+    "runs": [
+      {
+        "compactions": 1,
+        "ended": "2026-11-28T09:58:30Z",
+        "ended_because": "completed",
+        "iterations": 165,
+        "loop_recoveries": 0,
+        "messages": 278,
+        "seconds": 920,
+        "server_calls": {
+          "files": {
+            "edit": 3,
+            "read": 5,
+            "write": 5
+          },
+          "github": {
+            "commit_and_push": 1,
+            "create_pr": 1,
+            "get_issue": 1,
+            "get_issue_comments": 2
+          },
+          "shell": {
+            "bash": 165
+          }
+        },
+        "started": "2026-11-28T09:43:10Z"
       }
     ]
   }
