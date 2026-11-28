@@ -30235,6 +30235,61 @@
     ]
   },
   {
+    "path": "sessions/issue-674/engineer.json",
+    "agent": "engineer",
+    "messages": 200,
+    "calls": 108,
+    "failed": 1,
+    "refused": 0,
+    "skills": [
+      "conventions"
+    ],
+    "reported": false,
+    "tools": {
+      "get_issue": 2,
+      "get_issue_comments": 4,
+      "load_skill": 1,
+      "bash": 64,
+      "read": 11,
+      "write": 2,
+      "edit": 22,
+      "commit_and_push": 1,
+      "create_pr": 1
+    },
+    "acts": {
+      "other": 61,
+      "edit": 3
+    },
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-28T15:11:57Z",
+        "ended_because": "completed",
+        "iterations": 88,
+        "loop_recoveries": 0,
+        "messages": 200,
+        "seconds": 429,
+        "server_calls": {
+          "files": {
+            "edit": 22,
+            "read": 11,
+            "write": 2
+          },
+          "github": {
+            "commit_and_push": 1,
+            "create_pr": 1,
+            "get_issue": 2,
+            "get_issue_comments": 4
+          },
+          "shell": {
+            "bash": 64
+          }
+        },
+        "started": "2026-11-28T15:04:48Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-96/archive/engineer-1.json",
     "agent": "engineer",
     "messages": 268,
