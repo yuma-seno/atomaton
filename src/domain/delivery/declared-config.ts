@@ -84,26 +84,30 @@ export interface AtomaConfig {
   };
 
   /**
-   * How a change is verified. Exactly one arm; declaring both is a configuration error.
+   * How a change is verified: one list of checks, or a workflow of your own.
+   * Declaring both is a configuration error.
    *
-   * `from_pull_request` is named for whose code runs: the commands the pull request
-   * itself declares, in its own tree. It reaches no repository secret, and there is
-   * nowhere here to name one -- a pull request may rewrite any command it lists, so a
-   * credential would be one the change being judged can read.
-   *
-   * A check that needs a credential therefore has nowhere to go yet. That half is the
-   * default branch's commands given the pull request as data, and it is not built.
+   * Every check runs commands read from the DEFAULT BRANCH, against the pull request's
+   * tree. So an entry may name its own `secrets` — a pull request cannot add a check,
+   * rename one, or widen one, because the list it could edit is not the list that runs.
    */
   checks?: {
     /**
-     * The pull request's own commands, each entry its own job.
+     * The checks, each entry its own job.
      *
-     * Validated by `resolveDeclaredJobs`, which owns what a malformed one means and
-     * refuses a secret named here -- see `domain/delivery/declared-jobs.ts` for why there is
-     * nowhere to write one.
+     * Validated by `resolveChecks`, which owns what a malformed entry means, what a
+     * duplicate name means, and which names an entry may not use because its job
+     * environment already holds them.
+     */
+    jobs?: unknown;
+    /**
+     * Read into `jobs`. The arm the commands' owner used to be named for.
+     *
+     * @deprecated Write `checks.jobs` instead: an entry is read the same way from
+     * either key, including the right to name `secrets`.
      */
     from_pull_request?: unknown;
-    /** The default branch's commands. These may name secrets. */
+    /** @deprecated Read into `jobs`; see `from_pull_request`. */
     from_default_branch?: unknown;
     your_workflow?: string;
   };

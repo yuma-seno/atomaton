@@ -79,15 +79,28 @@ export function matrixSecretEnv(): Record<string, string> {
  */
 export function matrixJob(
   jobName: string,
-  planJob: DefinedJob<{ jobs: string }>,
+  planJob: DefinedJob<Record<string, string>>,
   options: {
     readonly timeoutMinutes: number;
     readonly failFast: boolean;
     readonly maxParallel?: number;
     readonly permissions: Readonly<Record<string, string>>;
+    /**
+     * Which of the planning job's outputs holds this matrix.
+     *
+     * A planner that publishes more than one list opens one job per list, and the lists
+     * are what differ -- `checks` splits its entries by whether they named a secret, so
+     * the two jobs read `uncredentialled` and `credentialled` from the same job. Default
+     * `jobs`, which is the one output a planner with nothing to split publishes.
+     */
+    readonly output?: string;
   },
   steps: readonly unknown[],
 ): DefinedJob {
+  const published = planJob.rawOutputs[options.output ?? "jobs"] ?? planJob.rawOutputs.jobs;
+  if (published === undefined) {
+    throw new Error(`${jobName}: the planning job ${planJob.name} publishes no \`${options.output}\` output`);
+  }
   return new DefinedJob(
     jobName,
     {
@@ -102,14 +115,14 @@ export function matrixJob(
       // they are looking for which one went wrong.
       name: `${jobName} (\${{ matrix.name }})`,
       needs: [planJob],
-      if: JobCondition.isNot(planJob.rawOutputs.jobs, "[]"),
+      if: JobCondition.isNot(published, "[]"),
       "runs-on": "${{ fromJSON(matrix.runs_on) }}" as unknown as string,
       "timeout-minutes": options.timeoutMinutes,
       permissions: options.permissions,
       strategy: {
         "fail-fast": options.failFast,
         ...(options.maxParallel === undefined ? {} : { "max-parallel": options.maxParallel }),
-        matrix: { include: `\${{ fromJSON(${planJob.rawOutputs.jobs}) }}` },
+        matrix: { include: `\${{ fromJSON(${published}) }}` },
       },
     },
     steps as never[],

@@ -211,10 +211,10 @@ export const RELEASE_MANIFEST = ".github/atomaton-release.json";
  *                      workspace is the pull request's own head, so reading how the
  *                      run behaves from there would let a pull request choose which
  *                      agent reviews it, with which commands and which credentials.
- *   checks             Unset: the job's checkout IS what it reads, and for the
- *                      `from_pull_request` arm that is the point — an agent adds a
- *                      dependency and proves it in the same pull request. It grants
- *                      nothing, because no credential reaches that arm.
+ *   checks             Set, to a checkout of the default branch. The commands, the
+ *                      configuration and the environment setup are all read there,
+ *                      so a pull request cannot change what runs against it. The
+ *                      checkout under test stays the working tree, and is data.
  *   deployment         Unset: the tag, or the default branch. Both are post-merge.
  *
  * So `machineryPath()` (see `adapters/runner/machinery.ts`) resolves a path and deliberately does

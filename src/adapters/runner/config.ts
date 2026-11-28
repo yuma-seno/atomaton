@@ -8,8 +8,8 @@
  */
 import { readFileSync } from "node:fs";
 import { DEFAULT_GOVERNED_PATHS } from "../../domain/delivery/merge-readiness.ts";
-import { CHECKS_FROM_DEFAULT_BRANCH, CHECKS_FROM_PULL_REQUEST } from "../../domain/delivery/check-jobs.ts";
-import { resolveDeclaredJobs, type DeclaredJobsResolution } from "../../domain/delivery/declared-jobs.ts";
+import { announceDeprecatedChecks, resolveChecks } from "../../domain/delivery/check-jobs.ts";
+import { type DeclaredJobsResolution, resolveDeclaredJobs } from "../../domain/delivery/declared-jobs.ts";
 import { resolveMergeGates, type MergeGatesResolution } from "../../domain/delivery/merge-gates.ts";
 import type { AtomaConfig, NewReleaseMode, NewReleaseScope } from "../../domain/delivery/declared-config.ts";
 import { isNewReleaseMode, isNewReleaseScope } from "../../domain/delivery/declared-config.ts";
@@ -306,28 +306,23 @@ export function getMergeGates(): MergeGatesResolution {
 // downgrading a credential decision to the working tree.
 
 /**
- * The checks whose commands the pull request itself declares.
+ * The checks this project declares, from `checks.jobs` and the two keys it replaced.
+ *
+ * Read from whichever config the caller was pointed at, and the workflow points the
+ * planning job at the DEFAULT BRANCH's copy. That is what makes the promise true: a
+ * pull request cannot add a check, rename one, or change which secret one receives.
  *
  * Empty means this project runs nothing through `atomaton-check.yml`, which is the
  * normal state for a repository pointing `checks.your_workflow` at its own workflow.
  *
- * `secretsAllowed: false` is the trust boundary, not a setting: a pull request may
- * rewrite any command it declares, so a credential named beside one is a credential
- * the change being judged can read.
+ * The one thing said here rather than at each caller is the deprecation notice: a
+ * config still holding `from_pull_request` or `from_default_branch` is read as the same
+ * list, and the author is told once — this is the reader every consumer goes through.
  */
-export function getPullRequestChecks(): DeclaredJobsResolution {
-  return resolveDeclaredJobs(loadConfig().checks?.from_pull_request, CHECKS_FROM_PULL_REQUEST);
-}
-
-/**
- * The checks that run the default branch's commands and may hold credentials.
- *
- * Read from whichever config the caller was pointed at, and the workflow points the
- * planning job at the DEFAULT BRANCH's copy. That is what makes the promise true: a
- * pull request cannot add a job, rename one, or change which secret one receives.
- */
-export function getDefaultBranchChecks(): DeclaredJobsResolution {
-  return resolveDeclaredJobs(loadConfig().checks?.from_default_branch, CHECKS_FROM_DEFAULT_BRANCH);
+export function getChecks(): DeclaredJobsResolution {
+  const { deprecated, ...resolution } = resolveChecks(loadConfig().checks);
+  announceDeprecatedChecks(deprecated);
+  return resolution;
 }
 
 /**

@@ -22,7 +22,7 @@ import { ref as planDeployRef } from "../entrypoints/machinery/plan_deploy.ts";
 // and a cloud rollout the same job: one runner, one set of credentials, and a
 // failure reported as "deploy" whichever of them broke. Now each entry is its own
 // GitHub job, so it picks its own machine and is handed the secrets it named and no
-// others -- the arrangement `checks.from_default_branch` already had.
+// others -- the arrangement `checks` already had.
 //
 // `max-parallel: 1` and `fail-fast: true` keep what the single job did provide:
 // declared order, and a stop at the first failure. With one deployment already
@@ -70,7 +70,7 @@ const PLAN_STEP_ID = "plan";
  *
  * So: what deploys comes from the branch a person approved, and the tree being
  * deployed supplies only what the commands operate on. It is the same split
- * `plan-default-branch-checks` makes, for the same reason.
+ * `plan-checks` makes, for the same reason.
  */
 const planJob = new DefinedJob<{ jobs: string; tags_before: string }>(
   PLAN_JOB,

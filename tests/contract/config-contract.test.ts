@@ -378,14 +378,14 @@ describe("config.yaml's recognised keys", () => {
 /**
  * The template ships one check, and it has to be one every adopter can run.
  *
- * `checks.from_pull_request` was empty, which `plan_checks.ts` reports as "this check
- * verified nothing" -- true, and the first hour of an adoption is a poor time to learn it.
+ * `checks.jobs` was empty, which `plan_checks.ts` reports as "this check verified
+ * nothing" -- true, and the first hour of an adoption is a poor time to learn it.
  * A credential is a credential in every language, so a secret scan is the one verification
  * a template can hand a project it knows nothing about. Everything beside it in that list
  * is the project's own and only the project can write it.
  */
 describe("the default checks a project inherits", () => {
-  const jobs = (shippedConfig().checks?.from_pull_request ?? []) as { commands?: string[] }[];
+  const jobs = (shippedConfig().checks?.jobs ?? []) as { commands?: string[] }[];
   const commands = jobs.flatMap((job) => job.commands ?? []);
 
   test("there is at least one, so an adoption does not start verifying nothing", () => {

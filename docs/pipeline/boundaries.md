@@ -2,40 +2,44 @@
 
 ## A check that needs a credential
 
-**`checks.from_pull_request` has no `secrets`, and cannot.** The commands there
-are the pull request's own, run in its own tree, so a credential named for them
-would be a credential the change being judged can read — a pull request may
-rewrite any command it declares. A check that needs one goes in the other half.
-The values stay in GitHub either way; only the names are ever in the config.
+**The commands come from the default branch.** A pull request cannot add a check,
+rename one, change what one runs, or widen which secret a job receives —
+[which ref a pipeline is read from](how-it-works.md). That is the one thing a
+credential rests on, and it holds for every entry in `checks.jobs` alike. The
+values stay in GitHub either way; only the names are ever in the config.
 
-Three things differ in `checks.from_default_branch`, and they are why a
-credential is safe there.
+**Each job names its own secrets.** A job is handed the ones its own entry named
+and no others, so a staging credential does not sit in the job that checks
+something else. An entry that names none runs in a job with no secret slots in it
+at all — not empty ones — so "this check cannot reach a credential" is a property
+of the workflow rather than of today's configuration.
 
-**The commands come from the default branch.** A pull request cannot change what
-runs, add a job, or widen which secret a job receives —
-[which ref a pipeline is read from](how-it-works.md).
+**A credentialed check runs in the default branch's tree.** That is the one place
+the two kinds of entry differ, and it is the difference that matters: a relative
+path in a credentialed entry — `./scripts/check-cloud.sh` — resolves to the file a
+person released, never to whatever the pull request put at that path. So a change
+cannot reach a credential by editing one file; the commands holding it are ones
+that were already reviewed and merged.
 
 **The pull request arrives as data.** `$ATOMATON_PR_TREE` is a path to a checkout
 of it. Read it; do not execute it. That is the same rule the check on the
 deliverable holds itself to, and nothing mechanical enforces it here — an
-interpreter reads a file rather than executing it, so no filesystem flag will
-stop `bash "$ATOMATON_PR_TREE/x.sh"`. It rests on review, which is why this list
-is meant to stay short.
+interpreter reads a file rather than executing it, so no filesystem flag will stop
+`bash "$ATOMATON_PR_TREE/x.sh"`. It rests on review, which is why this list is
+meant to stay short.
 
-**Each job names its own secrets.** A job is handed the ones its own entry named
-and no others, so a staging credential does not sit in the job that checks
-something else.
+An entry that names no secret is the other way round: the pull request is its
+working tree, so its commands run against the change in place — that is the point
+of a check — and there is no credential in the job for the code it runs to read.
 
-What you cannot write is a pull request's own command holding a credential. There
-is no spelling for it: one half has no `secrets` key and the other takes no
-commands from the pull request. A check that genuinely needs both — integration
-tests against a real environment, say — belongs after the merge, or wants a
-credential you would not mind losing.
+A check that genuinely needs both at once — integration tests against a real
+environment, say — belongs after the merge, or wants a credential you would not
+mind losing.
 
 The other direction is worth knowing: a tool that needs a credential you would
-rather not route into an agent's environment can be a step in
-`checks.from_pull_request` instead, because that list runs in its own job. What
-routing does and does not protect is
+rather not route into an agent's environment can be a step in `checks.jobs`
+instead, because that list runs in its own job. What routing does and does not
+protect is
 [what a tool can and cannot be protected from](../tools/boundaries.md#what-a-tool-can-and-cannot-be-protected-from).
 
 ## A deployment refuses a branch anyone can push to

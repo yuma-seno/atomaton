@@ -8,21 +8,18 @@
  * jobs that could name secrets; `deploy` had targets with their own spelling again,
  * and one `secrets` list shared by every target. This is the one shape.
  *
- * ## What differs, and why it is the only thing that differs
+ * ## What decides whether an entry may name a credential
  *
- * **Whether an entry may name a secret.** That is not a preference, it is the trust
- * boundary itself.
+ * The tree the LIST is read from, and that is deliberately not a property of this
+ * module. `checks` is read from the default branch, and the job an entry with a
+ * credential lands in runs in that same tree; `deploy` is read from the branch or tag it
+ * ships, after the merge. Neither is the change under review, so a credential named
+ * beside an entry is safe in both -- and the question this module used to answer, which
+ * arm may hold a key, went with the arms.
  *
- * A pull request may rewrite any command it declares, so a credential named beside
- * one is a credential the change being judged can read. There is therefore nowhere to
- * write it: that list's `secrets` rule is a refusal, and naming one is reported
- * rather than quietly dropped. Where the commands come from the default branch — or
- * run after a merge — a pull request cannot choose what runs, and a credential is
- * safe to name.
- *
- * The arrangement nobody should write is not a rule to remember. It has no spelling:
- * `secrets` is either a place to put them or a reason there is none, and there is no
- * third value meaning "allowed, but nowhere to go".
+ * What is left to remember is a name that would REPLACE something the job already has:
+ * each list says which of those it reserves, and naming one is reported rather than
+ * quietly dropped.
  *
  * ## What is NOT decided here
  *
@@ -51,23 +48,11 @@ export interface DeclaredJob {
   /** Run in order, stopping at the first failure. */
   readonly commands: readonly string[];
   /**
-   * Repository secrets this job may reach, by name. Only this job receives them.
-   *
-   * Always empty where the list refuses them, and empty is the ordinary answer
-   * everywhere else too.
+   * Repository secrets this job may reach, by name. Only this job receives them, and
+   * empty is the ordinary answer.
    */
   readonly secrets: readonly string[];
 }
-
-/**
- * Where an entry's credentials go, or why it has none.
- *
- * `reserved` is what that job's own environment already uses — declaring one of those
- * would replace a value the job depends on rather than add a credential.
- */
-export type SecretsRule =
-  | { readonly reserved: ReadonlySet<string> }
-  | { readonly refused: string };
 
 /** The keys one list owns beyond the shared ones, and how to read them. */
 export interface ExtraKeys<Extra> {
@@ -82,10 +67,16 @@ export interface ExtraKeys<Extra> {
 }
 
 export interface DeclaredJobsRules<Extra extends object = Record<never, never>> {
-  /** How to name this list in a message — `checks.from_pull_request`, say. */
+  /** How to name this list in a message — `checks.jobs`, say. */
   readonly where: string;
-  /** Where an entry's credentials go here, or why there is nowhere. See the header. */
-  readonly secrets: SecretsRule;
+  /**
+   * The names this list's job environment already uses.
+   *
+   * Declaring one of them would replace a value the job depends on rather than add a
+   * credential. The sets differ per list because the jobs do; `declared-secrets.ts`
+   * owns each one.
+   */
+  readonly secrets: ReadonlySet<string>;
   /** Present only for a list with keys of its own. */
   readonly extra?: ExtraKeys<Extra>;
 }
@@ -179,33 +170,25 @@ export function resolveDeclaredJobs<Extra extends object = Record<never, never>>
 }
 
 /**
- * This entry's credentials, or null when it named one it may not have.
+ * This entry's credentials, or null when one of them could not be read.
  *
  * `path` is the entry's dotted path and `where` the same thing in backticks: one goes
  * inside the field name a problem names, the other in front of the sentence.
  */
 function readSecrets(
   raw: unknown,
-  rule: SecretsRule,
+  reserved: ReadonlySet<string>,
   path: string,
   where: string,
   problems: string[],
 ): readonly string[] | null {
   if (raw === undefined || raw === null) return [];
-  if ("refused" in rule) {
-    if (Array.isArray(raw) && raw.length === 0) return [];
-    // Refused, not dropped. A credential silently ignored is a job that behaves as
-    // though it had one until the command that needs it fails, and the reason is in
-    // neither the log nor the configuration.
-    problems.push(`${where}: \`secrets\` cannot be named here. ${rule.refused}`);
-    return null;
-  }
   // The same validator `tools.secrets` gets -- the name's shape, the slot cap, and the
   // names this job's own environment already uses -- named for the one entry it came
   // from, because that is the line somebody has to go and edit.
   const { names, problems: found } = resolveDeclaredSecrets(raw, {
     field: `${path}.secrets`,
-    reserved: rule.reserved,
+    reserved,
   });
   problems.push(...found);
   return found.length > 0 ? null : names;
