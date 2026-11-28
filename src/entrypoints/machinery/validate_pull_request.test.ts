@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { FAKE_GH_IMPL } from "./testing/fake-gh-env.ts";
 import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
@@ -234,6 +234,7 @@ describe("notifyCiWaiting, through the whole script", () => {
     thread: unknown[] = [],
     agents: string[] = [],
     extraRules: FakeGhRule[] = [],
+    headTreeFiles: Record<string, string> = {},
   ): Validation {
     const runsRule = { match: ["actions/runs?head_sha="] };
     const runs = (list: Record<string, unknown>[]) => JSON.stringify({ total_count: list.length, workflow_runs: list });
@@ -272,6 +273,14 @@ describe("notifyCiWaiting, through the whole script", () => {
       // A `/<agent>` line is only a request when a definition exists for it, so a
       // test that expects a dispatch has to give the name one.
       for (const agent of agents) writeFileSync(join(defDir, `${agent}.md`), "");
+      // The pull request's own tree, as the workflow checks it out. Empty unless a
+      // test is about what a tree carrying conflict markers does.
+      const headTreeDir = join(dir, "pr-head");
+      mkdirSync(headTreeDir);
+      for (const [path, content] of Object.entries(headTreeFiles)) {
+        mkdirSync(dirname(join(headTreeDir, path)), { recursive: true });
+        writeFileSync(join(headTreeDir, path), content);
+      }
       const outputFile = join(dir, "out");
       writeFileSync(outputFile, "");
       const result = runWithFakeGh(
@@ -283,6 +292,7 @@ describe("notifyCiWaiting, through the whole script", () => {
           "--workflow", "ci.yml",
           "--def-dir", defDir,
           "--deliverable-report", report,
+          "--head-tree", headTreeDir,
           "--asked-by-person", askedByPerson ? "true" : "false",
           "--timeout-seconds", "1",
         ],
@@ -431,6 +441,93 @@ describe("notifyCiWaiting, through the whole script", () => {
     expect(v.comments.length).toBe(1);
     expect(v.comments[0]).toContain("CI concluded failure");
   }, WAIT);
+
+  /**
+   * A tree carrying conflict markers is waiting, not failing (#674).
+   *
+   * The update machinery leaves markers where a release and this tree both changed a
+   * file, and the checks then report on a half-merged tree -- which reads on the pull
+   * request as an unexplained red. The comment says which of the two it is, names the
+   * files, and leaves the verdict alone: the check stays red, because a tree with
+   * markers must not be mergeable.
+   */
+  describe("a tree carrying conflict markers", () => {
+    /** What `git merge-file` writes, which is what the update machinery commits. */
+    const MARKED = "<<<<<<< ours\nbase_branch: main\n=======\nbase_branch: trunk\n>>>>>>> theirs\n";
+    const required = {
+      match: ["repos/o/r/rules/branches/main"],
+      stdout: JSON.stringify([
+        { type: "required_status_checks", parameters: { required_status_checks: [{ context: "atomaton-check" }] } },
+      ]),
+    };
+    const markerComment = (bodies: string[]): string | undefined =>
+      bodies.find((body) => body.includes("waiting for its conflict markers"));
+
+    test("says it is waiting and names the files, instead of reporting a failure", () => {
+      const v = runValidation(ciActionRun("completed", "failure"), true, [], [], [], {
+        "src/marked.ts": `const a = 1;\n${MARKED}`,
+      });
+      const notice = markerComment(v.comments);
+      expect(notice, "the waiting comment is posted").toBeDefined();
+      expect(notice).toContain("`src/marked.ts`");
+      expect(notice).toContain("the checks run their real judgement on the resolved tree");
+      // One comment, and it is not the failure brief: what broke and which agent to ask
+      // for a fix are not the next things here.
+      expect(v.comments.length).toBe(1);
+      expect(v.comments[0]).not.toContain("CI concluded failure");
+      // The verdict is untouched: the checks still say the tree failed.
+      expect(v.out.conclusion).toBe("failure");
+      expect(v.out.verdict_passed).toBe("false");
+    }, WAIT);
+
+    // The scan changes what is said, not what runs: a marker tree still gets a real
+    // check, so it is red rather than merely unjudged.
+    test("CI is still dispatched for a marker tree", () => {
+      const v = runValidation(undefined, true, [], [], [], { "src/marked.ts": MARKED });
+      expect(dispatchedCi(v.ghCalls), "the check still runs").toBe(true);
+      expect(markerComment(v.comments), "the waiting comment is posted").toBeDefined();
+      // The brief for a run that never reported is replaced, not joined.
+      expect(v.comments.some((body) => body.includes("CI never reported a conclusion"))).toBe(false);
+    }, WAIT);
+
+    test("the mirrored check is still written as failing", () => {
+      const v = runValidation(
+        ciActionRun("completed", "failure"),
+        true,
+        [],
+        [],
+        [required, { match: ["POST", "check-runs"], stdout: "{}" }],
+        { "src/marked.ts": MARKED },
+      );
+      const written = v.ghCalls.filter((call) => call.includes("POST") && call.join(" ").includes("check-runs"));
+      expect(written.length).toBe(1);
+      expect(written[0]?.join(" ")).toContain("conclusion=failure");
+      expect(markerComment(v.comments)).toBeDefined();
+    }, WAIT);
+
+    // Green is not a reason to stay quiet: a tree that can merge with markers in it is
+    // worse than a red one, and the person reading the pull request needs to know the
+    // check they are looking at did not judge the work.
+    test("says it is waiting even when the check passed", () => {
+      const v = runValidation(ciActionRun("completed", "success"), true, [], [], [], {
+        "docs/guide.md": MARKED,
+      });
+      const notice = markerComment(v.comments);
+      expect(notice).toBeDefined();
+      expect(notice).toContain("`docs/guide.md`");
+      expect(notice).not.toContain("Failing run:");
+    }, WAIT);
+
+    // A file that only quotes a marker line is prose about conflicts, not a conflict.
+    test("a tree with no markers gets the failure brief as before", () => {
+      const v = runValidation(ciActionRun("completed", "failure"), true, [], [], [], {
+        "README.md": "Resolve the `<<<<<<< ours` lines first.\n",
+      });
+      expect(markerComment(v.comments)).toBeUndefined();
+      expect(v.comments.length).toBe(1);
+      expect(v.comments[0]).toContain("CI concluded failure");
+    }, WAIT);
+  });
 
   /**
    * The mirror is the only check a ruleset accepts (see the script's header), and a

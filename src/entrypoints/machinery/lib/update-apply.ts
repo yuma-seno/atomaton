@@ -6,18 +6,12 @@
  * it adds is the merge itself: a path marked `merge` — both sides changed it — is
  * resolved with `git merge-file`, the same three-way merge a normal git merge runs,
  * given the base content, the adopter's content, and the target content. The result
- * is either content both sides can live with, or a report that a person (or an agent
- * acting for one) is needed on that path.
+ * is either content both sides can live with, or content carrying conflict markers
+ * and a report that a person (or an agent acting for one) is needed on that path.
  *
  * That is why the machinery's stop condition is measured here and not declared
  * upstream: whether BOTH sides changed a file says a merge is needed; running the
  * merge says whether it had a collision.
- *
- * ## What a collision is written as
- *
- * A collision is normally written into the tree as conflict markers, because that
- * is the one form a person or an agent can read the two sides out of. `config.yaml`
- * is the exception and is never written that way — `NEVER_MARKED` says why.
  *
  * ## Everything is decided before anything is written
  *
@@ -35,36 +29,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
-import { CONFIG_FILE } from "../../../domain/machinery/machinery-layout.ts";
 import type { UpdatePlan } from "../../../domain/machinery/update-plan.ts";
-
-/**
- * Paths whose collision is reported instead of written into the tree.
- *
- * `.github/atomaton/config.yaml` is the machinery's own control file: every check
- * job is declared in it, and so are the setup commands, the merge policy and the
- * reach of every tool server. A marker makes YAML unparseable, and an unparseable
- * config is a state nothing recovers from — the pull request's checks cannot be
- * planned, `run_environment_setup.ts` dies before an agent starts, the servers of a
- * run that did start die reading it — so markers there name a decision nobody can
- * reach. That was #668: a self-apply left them in the file and every job failed with
- * `Multiline implicit key`, on the commit and on every re-run of it.
- *
- * The tree's own copy stays and the two sides go into the pull request's body
- * (`UpdateReport.held`), which is where a person reads a diff. The run still stops
- * at that pull request: the update decides nothing about a value here.
- */
-const NEVER_MARKED: ReadonlySet<string> = new Set([CONFIG_FILE]);
-
-/** A collision the tree did not take, with the content that would have carried it. */
-export interface HeldCollision {
-  readonly path: string;
-  /**
-   * What `git merge-file` produced: both sides, labelled, with markers. Reported in
-   * the pull request, never written — a marker here is what `NEVER_MARKED` is for.
-   */
-  readonly text: string;
-}
 
 /** What applying a plan did, as the pull request and the notices render it. */
 export interface ApplyResult {
@@ -78,8 +43,6 @@ export interface ApplyResult {
   readonly merged: readonly string[];
   /** Plan: merge — paths whose merge collided, now carrying conflict markers. */
   readonly conflicts: readonly string[];
-  /** Plan: merge — paths whose merge collided and whose content stayed as the tree has it. */
-  readonly held: readonly HeldCollision[];
 }
 
 /** Every path refuses together: no `why` means the tree holds the whole plan. */
@@ -126,7 +89,6 @@ export function applyPlan(
   const removed: string[] = [];
   const merged: string[] = [];
   const conflicts: string[] = [];
-  const held: HeldCollision[] = [];
 
   for (const path of plan.take) {
     const content = target.get(path);
@@ -178,14 +140,6 @@ export function applyPlan(
       }
       const outcome = mergeFile(scratch, basename(path) || path, baseContent, oursContent, targetContent);
       if ("why" in outcome) return { why: outcome.why };
-      if (outcome.conflicts > 0 && NEVER_MARKED.has(path)) {
-        // The tree keeps what it had; the merge's output is for the report. Not a
-        // `merged` (nothing was resolved on either side) and not a `conflict` (the
-        // markers are not in the tree) — `held` is both facts at once.
-        writes.set(path, oursContent);
-        held.push({ path, text: outcome.content });
-        continue;
-      }
       writes.set(path, outcome.content);
       (outcome.conflicts > 0 ? conflicts : merged).push(path);
     }
@@ -237,7 +191,7 @@ export function applyPlan(
     }
   }
 
-  return { result: { taken, added, removed, merged, conflicts, held } };
+  return { result: { taken, added, removed, merged, conflicts } };
 }
 
 /**

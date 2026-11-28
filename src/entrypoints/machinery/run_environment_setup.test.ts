@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { CONFIG_FILE } from "../../domain/machinery/machinery-layout.ts";
+import { rmSync } from "node:fs";
 import { hermeticEnv, makeConfigDir, scriptPath } from "./testing/harness.ts";
 
 /**
@@ -55,29 +53,6 @@ describe("run_environment_setup.ts", () => {
       const r = run(dir);
       expect(r.status).toBe(0);
       expect(r.stdout).toContain("skipping");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  /**
-   * A tree whose config is left half-resolved is a tree nothing can run in, and the
-   * parse's own complaint about a marker names a token — `Multiline implicit key` —
-   * rather than the cause. This is the job that failed with exactly that in the
-   * incident (#668), so it is the one that has to say what is wrong.
-   */
-  test("names a config carrying conflict markers instead of a YAML syntax error", () => {
-    const dir = makeConfigDir({});
-    try {
-      writeFileSync(
-        join(dir, CONFIG_FILE),
-        "<<<<<<< config.yaml (ours)\nbase_branch: main\n=======\nbase_branch: trunk\n>>>>>>> config.yaml (theirs)\n",
-      );
-      const r = run(dir);
-      expect(r.status).not.toBe(0);
-      expect(r.stderr).toContain("carries a conflict marker");
-      expect(r.stderr).toContain(CONFIG_FILE);
-      expect(r.stderr).not.toContain("Multiline implicit key");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -25,14 +25,8 @@ it rewritten. It is gone, and what replaces it is the ordinary git three-way mer
   both sides. The pull request stands, nothing merges, and resolving it is
   [yours to make](tasks/move-to-a-newer-release.md) — by hand, or by asking an
   agent on that pull request.
-- **`.github/atomaton/config.yaml` is the one path written without markers.** Every
-  job reads that file to know what to run — the checks, the setup commands, the merge
-  policy, what each tool server may reach — so a marker in it leaves a pull request
-  whose checks cannot be planned and whose runs cannot start, with nothing left that
-  could resolve it. Its collision is put in the pull request's body instead, your copy
-  stays in the tree, and the pull request stops for you the same way.
 
-No other path is special-cased. Whether something collides is measured from what your
+No path is special-cased. Whether something collides is measured from what your
 tree actually holds, at update time — so a file you customised in a directory the
 template mostly owns behaves exactly like one in a directory you own outright, and
 a directory upstream adds needs no new rule to be handled correctly.

@@ -59,7 +59,7 @@ import { dispatchUpdateConflictAgent } from "../../adapters/actions/dispatch-tar
 import { tryGetUpdateConflictPolicy } from "../../adapters/runner/config.ts";
 import { updateBranchFor } from "./lib/update-branch.ts";
 import { findOpenNotice, NOTICE_MARKER } from "./lib/notice-issue.ts";
-import { applyPlan, type HeldCollision } from "./lib/update-apply.ts";
+import { applyPlan } from "./lib/update-apply.ts";
 import {
   UPSTREAM_REPOSITORY,
   latestReleaseTag,
@@ -112,8 +112,6 @@ export interface UpdateReport {
   readonly plan: UpdatePlan;
   /** Paths whose merge collided, as `applyPlan` measured them. */
   readonly conflicts: readonly string[];
-  /** Paths whose merge collided and whose content stayed as the tree has it. */
-  readonly held: readonly HeldCollision[];
   /** Paths whose merge resolved with no conflict. */
   readonly merged: readonly string[];
   /** Paths the target no longer ships — reported, never acted on. */
@@ -135,7 +133,7 @@ export function updateBody(report: UpdateReport, conflictAgent = ""): string {
   const { plan } = report;
   const lines: string[] = [
     "<!-- atomaton:update -->",
-    verdictSentence(plan.base, plan.target, report.conflicts.length + report.held.length, plan.kept.length),
+    verdictSentence(plan.base, plan.target, report.conflicts.length, plan.kept.length),
     "",
     "## The plan",
     "",
@@ -147,7 +145,6 @@ export function updateBody(report: UpdateReport, conflictAgent = ""): string {
     `| Files changed on **both** sides | ${plan.merge.length} |`,
     `| Resolved by the merge itself | ${report.merged.length} |`,
     `| Left with conflict markers | ${report.conflicts.length} |`,
-    `| Kept as this tree has it, both sides below | ${report.held.length} |`,
     `| Paths the plan will not touch | ${plan.kept.length} |`,
     "",
   ];
@@ -178,30 +175,6 @@ export function updateBody(report: UpdateReport, conflictAgent = ""): string {
     );
   }
 
-  if (report.held.length > 0) {
-    lines.push(
-      "## Kept as this tree has it, both sides below",
-      "",
-      "Markers are not written into a file the machinery reads as its own settings: with one in place",
-      "nothing in this tree can read it — the checks are declared there, so the checks cannot even be",
-      "planned, and no run started on this pull request can read them either. The tree's copy stays and",
-      "the release's version is below; take what the release has by editing the file here.",
-      "",
-    );
-    for (const collision of report.held) {
-      lines.push(
-        `<details><summary><code>${collision.path}</code> — both sides</summary>`,
-        "",
-        "````",
-        collision.text.trimEnd(),
-        "````",
-        "",
-        "</details>",
-        "",
-      );
-    }
-  }
-
   lines.push(
     "## What happens next",
     "",
@@ -209,11 +182,9 @@ export function updateBody(report: UpdateReport, conflictAgent = ""): string {
       ? conflictAgent !== ""
         ? `This pull request does not merge on its own: the conflicted files above carry markers naming both sides. \`${conflictAgent}\` is started on it to resolve them — the checks run on the resolved tree, and then it can merge. One kind is not the agent's: a path under \`.github/workflows/\` cannot be written with its token, so those markers are left for a person, and a pull request carrying both kinds is handled the same way.`
         : "This pull request does not merge on its own: the conflicted files above carry markers naming both sides. Comment on this pull request and ask an agent to resolve them — the checks will run on the resolved tree, and only then can this merge."
-      : report.held.length > 0
-        ? "This pull request does not merge on its own: the paths kept above show what the release has beside what this tree has, and choosing between them is a person's. Edit the files here to take what you want, and the checks run on the result."
-        : plan.kept.length > 0
-          ? "This pull request does not merge itself: the kept paths above are the plan declining to touch them without a person. Read them — each is a place this repository's words and the release disagree — and merge by hand when they read right, or ask an agent there to help."
-          : "The repository's checks run on this pull request; when they pass, the update merges it and closes the notice.",
+      : plan.kept.length > 0
+        ? "This pull request does not merge itself: the kept paths above are the plan declining to touch them without a person. Read them — each is a place this repository's words and the release disagree — and merge by hand when they read right, or ask an agent there to help."
+        : "The repository's checks run on this pull request; when they pass, the update merges it and closes the notice.",
     "",
   );
   return `${lines.join("\n").trimEnd()}\n`;
@@ -238,14 +209,9 @@ export function stopComment(
   prNumber: number,
   resolution: ConflictResolution | null = null,
 ): string {
-  const count = report.conflicts.length + report.held.length;
-  const where =
-    report.conflicts.length > 0
-      ? "The conflicted files carry markers naming both sides."
-      : "This tree's copy of each collided file stays, and both sides are in the pull request's body.";
   const next =
     resolution === null
-      ? `Comment on that pull request and ask an agent to help — nothing merges until someone does.`
+      ? "Comment on that pull request and ask an agent to resolve them — nothing merges until someone does."
       : resolution.started
         ? `\`${resolution.agent}\` has been started on that pull request to resolve them. A conflicted ` +
           "path under `.github/workflows/` is left for a person, because an agent's token cannot write " +
@@ -259,12 +225,11 @@ export function stopComment(
     // ask) ON the pull request — the thread that asked learns where the work
     // stands, and the next run reading this thread gains nothing from it.
     LLM_CONTEXT_TAG.write("exclude"),
-    `Taking ${report.plan.target} stopped at a pull request: ${count} file(s) changed on both sides.`,
+    `Taking ${report.plan.target} stopped at a pull request: ${report.conflicts.length} file(s) changed on both sides.`,
     "",
     ...report.conflicts.map((path) => `- \`${path}\``),
-    ...report.held.map((collision) => `- \`${collision.path}\` — kept as this tree has it`),
     "",
-    `The plan is applied on #${prNumber}. ${where} ${next}`,
+    `The plan is applied on #${prNumber}, where the conflicts carry markers naming both sides. ${next}`,
   ].join("\n");
 }
 
@@ -480,11 +445,10 @@ function main(): void {
     console.error(`::error::the plan could not be applied: ${applied.why}. The tree is left as it was before this run.`);
     process.exit(1);
   }
-  const { conflicts, held, merged } = applied.result;
+  const { conflicts, merged } = applied.result;
   log(
     `applied: ${applied.result.taken.length} taken, ${applied.result.added.length} added, ` +
-      `${applied.result.removed.length} removed, ${merged.length} merged, ${conflicts.length} conflicted, ` +
-      `${held.length} held as the tree has them`,
+      `${applied.result.removed.length} removed, ${merged.length} merged, ${conflicts.length} conflicted`,
   );
 
   const branch = updateBranchFor(targetTag);
@@ -501,11 +465,9 @@ function main(): void {
   const committed = gitOrFail(
     ["-c", `user.name=${COMMIT_NAME}`, "-c", `user.email=${COMMIT_EMAIL}`, "commit",
       "-m", updateTitle(targetTag), "-m",
-      conflicts.length === 0 && held.length === 0
+      conflicts.length === 0
         ? `Applied by the update machinery from ${plan.base}. Nothing here collided.`
-        : `Applied by the update machinery from ${plan.base}. ` +
-          `${conflicts.length + held.length} file(s) changed on both sides are left for a person on the pull request` +
-          `${conflicts.length > 0 ? ` (${conflicts.length} carrying conflict markers)` : ""}.`,
+        : `Applied by the update machinery from ${plan.base}. ${conflicts.length} file(s) carry conflict markers for a person or an agent to resolve on the pull request.`,
     ],
     "commit the applied plan",
   );
@@ -533,21 +495,20 @@ function main(): void {
   // covered: the plan declined to decide there, and a person decides -- whatever the
   // mode says.
   //
-  // Non-throwing, because a config this run cannot read must not end the run HERE:
-  // the push has already happened, so a throw would leave a pushed branch, no pull
-  // request, and nobody told (#638). The apply no longer writes markers into the file
-  // (`lib/update-apply.ts`), so what is left is a tree that arrived with a config
-  // nothing can parse -- a person's edit, a release's copy that does not parse.
+  // Non-throwing, because the file it reads is one this run has just written: when
+  // config.yaml is itself a path both sides changed, it carries conflict markers, and
+  // an exception here would end the run after the push and before the pull request --
+  // leaving a marker-carrying branch, no pull request, and nobody told (#638).
   const policy = tryGetUpdateConflictPolicy();
   if (!policy.readable) {
     log(
-      "WARN config.yaml could not be read after the plan was applied. " +
+      "WARN config.yaml could not be read after the plan was applied — it is one of the paths the merge left with conflict markers. " +
         "The collision policy is unknown, so no agent is started and the run stops for a person at the pull request.",
     );
   }
   const conflictAgent = policy.agent;
 
-  const report: UpdateReport = { plan, conflicts, held, merged, leftovers };
+  const report: UpdateReport = { plan, conflicts, merged, leftovers };
   const existing = openPrForHead(repo, branch);
   let prNumber: number;
   if (existing > 0) {
@@ -590,14 +551,12 @@ function main(): void {
 
   const notice = findOpenNotice(repo);
 
-  // The merge gate is conflicts, held paths AND kept paths. A clean plan with
-  // `keep` entries has applied everything but decided nothing where the plan was
-  // not sure -- and the plan's own report says "needs a decision here", so the run
-  // does not get to say so and then make it. A held path is the same judgement made
-  // after measuring: `git merge-file` collided, and the machinery will not put that
-  // collision into a file whose whole job is to be readable. The self-merging path
-  // below runs only when there is none of the three.
-  const selfMerging = conflicts.length === 0 && held.length === 0 && plan.kept.length === 0;
+  // The merge gate is conflicts AND kept paths. A clean plan with `keep`
+  // entries has applied everything but decided nothing where the plan was not
+  // sure -- and the plan's own report says "needs a decision here", so the run
+  // does not get to say so and then make it. The self-merging path below runs
+  // only when there is neither kind of stop.
+  const selfMerging = conflicts.length === 0 && plan.kept.length === 0;
   let merging = false;
   if (selfMerging) {
     // Not `--auto`. Auto-merge is a repository setting, and depending on it made
@@ -662,18 +621,15 @@ function main(): void {
     log(`update to ${targetTag} is applied on #${prNumber}, held for a person: ${plan.kept.length} kept path(s)`);
     return;
   }
-  // Collisions stop the run the way the plan says: the pull request carries the
-  // markers it can, the two sides it cannot, and the threads that asked are told
-  // where to resolve them. The notice stays open — no merge happened, so its
-  // promise is still unkept.
-  if (conflicts.length > 0 || held.length > 0) {
+  // Conflicts stop the run the way the plan says: the pull request carries the
+  // markers, and the threads that asked are told where to resolve them. The
+  // notice stays open — no merge happened, so its promise is still unkept.
+  if (conflicts.length > 0) {
     // The agent first, so the comment below reports what actually happened to it
     // rather than what this run meant to do. A dispatch GitHub refuses leaves the
     // pull request for a person, which is `pr`'s behaviour and not a failed run.
-    // Nothing to start for a held collision alone: its two sides are reported, not
-    // written, so there is no marker on the branch for an agent to resolve.
     const resolution: ConflictResolution | null =
-      conflictAgent === "" || conflicts.length === 0
+      conflictAgent === ""
         ? null
         : {
             agent: conflictAgent,
@@ -691,10 +647,7 @@ function main(): void {
       const told = gh("issue", "comment", String(source), "--repo", repo, "--body", said);
       if (told.code !== 0) log(`WARN could not answer in #${source}: ${told.stderr.trim()}`);
     }
-    log(
-      `stopped at pull request #${prNumber}: ${conflicts.length} conflicted file(s), ` +
-        `${held.length} kept as this tree has them`,
-    );
+    log(`stopped at pull request #${prNumber}: ${conflicts.length} conflicted file(s)`);
     return;
   }
 
