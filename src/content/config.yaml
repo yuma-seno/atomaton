@@ -124,20 +124,34 @@ merge:
 # after all, headed by a warning that says why: neither that nor a refused dispatch
 # is a reason for the daily run to fail.
 #
-# Which releases are noticed at all:
-#
-#   all      every release newer than yours. Also what an unset key means, and what
-#            every project noticed before this key existed.
-#   marked   only the releases whose notes carry `atomaton:adopt` -- the release's own
-#            claim that it should be taken promptly. How far a version number moves
-#            says what the change is compatible with, never whether it matters: a
-#            patch can close a vulnerability, and a minor can be a feature nobody is
-#            waiting for.
-#
 # `on_new_release` above decides what happens once a release is noticed; this decides
-# which ones are.
+# which ones are, and both keys sit under `update`.
+#
+# The template ships `marked`, stated outright rather than left to the machinery's
+# own reading of an absent key. The mark is what the setting is for, and the
+# absent-key reading is older than the key is: a repository set up before this line
+# reached the template notices every release while its config lacks the key. When an
+# update merge brings the line in, the scope becomes `marked` and the repository
+# starts noticing only the releases whose notes carry `atomaton:adopt` -- to keep
+# noticing every release, set this to `all`.
 update:
   on_new_release: pr-agent
+  detection_scope:
+    # One of `marked` or `all`.
+    #
+    #   marked  only the releases whose own notes carry `atomaton:adopt` -- the
+    #           release's own claim that it should be taken promptly. How far a
+    #           version number moves says what the change is compatible with, never
+    #           whether it matters: a patch can close a vulnerability, and a minor
+    #           can be a feature nobody is waiting for.
+    #   all     every release newer than yours. Also what an unset key means, and
+    #           what every project noticed before this key existed.
+    #
+    # `marked` reads the release list before it does anything else, so a list that
+    # cannot be read stops the run with an error rather than reading as "nothing is
+    # marked" -- a watch that silently stopped for as long as the API was blipping
+    # would say nothing about having done so.
+    marked
 
 
 # When a chain of runs stops and asks a person.

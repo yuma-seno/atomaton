@@ -38,9 +38,10 @@ would rather read the notice first deletes the line, or sets `issue` — which i
 also what an absent key means.
 
 **Which releases are noticed at all** is
-[`update.detection_scope`](../../work/reference.md#updatedetection_scope), and an
-absent key means every one. At `marked`, only the releases whose notes carry
-`atomaton:adopt` are noticed: a newer release with no mark in its notes writes no
+[`update.detection_scope`](../../work/reference.md#updatedetection_scope). An absent
+key means every one — what repositories noticed before the key existed — and the
+shipped template states `marked` outright. At `marked`, only the releases whose notes
+carry `atomaton:adopt` are noticed: a newer release with no mark in its notes writes no
 notice and starts nothing, and the daily run stays green. The template marks a release
 when a stale tree should stop waiting for it, which is a judgement about the release
 rather than about how far its version number moved.
