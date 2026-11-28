@@ -75,16 +75,24 @@ export function resolveChecks(section: unknown): ChecksResolution {
 
     const resolved = resolveDeclaredJobs(raw, rules);
     problems.push(...resolved.problems);
-    // Across the keys as well as within one, because a name is a job name wherever it
-    // sits: the config most likely to hold two of them is one halfway through the move,
-    // with the entries under `jobs` and the old key not deleted yet.
+    // A name is a job name wherever it sits, with one exception, and it is the
+    // exception a config that worked the day before can arrive holding: the two
+    // legacy keys were two separate lists, each planning jobs of its own, so one name
+    // in both was two jobs with one name -- legible, and green. Both entries still
+    // pass, so a repository carrying that shape keeps both checks when the release
+    // carrying this reader lands; a refusal here instead would exit the planning job
+    // and turn every pull request's required check red on a config nobody changed.
+    // Every other overlap -- a name twice in `jobs`, a `jobs` name repeated beside an
+    // old key -- is a hybrid with no old meaning to keep, and stays a problem.
     for (const job of resolved.jobs) {
       const already = declaredIn.get(job.name);
-      if (already !== undefined) {
+      const spansTheOldArms =
+        key !== "jobs" && already !== undefined && already !== rules.where && already !== CHECKS.where;
+      if (already !== undefined && !spansTheOldArms) {
         problems.push(`\`${rules.where}\`: '${job.name}' is already declared in \`${already}\`.`);
         continue;
       }
-      declaredIn.set(job.name, rules.where);
+      if (already === undefined) declaredIn.set(job.name, rules.where);
       jobs.push(job);
     }
   }

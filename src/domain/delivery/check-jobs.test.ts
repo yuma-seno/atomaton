@@ -91,6 +91,24 @@ describe("resolveChecks", () => {
     expect(problems[0]).toContain("checks.jobs");
   });
 
+  /**
+   * The shape a config that worked the day before could arrive holding: one name in
+   * both old keys. They were two separate lists then, each planning jobs of its own,
+   * so this was two jobs with one name -- `pull-request-checks (x)` beside
+   * `default-branch-checks (x)` -- and refusing it now would be an upgrade nobody
+   * asked for: the planning job would exit and every pull request's required check
+   * would go red on a repository whose config no one changed. Both entries pass.
+   */
+  test("a name across the two old keys is the shape it held before, and both entries run", () => {
+    const { jobs, problems } = resolveChecks({
+      from_pull_request: [{ name: "smoke", commands: ["bun run smoke"] }],
+      from_default_branch: [{ name: "smoke", commands: ["bun run smoke"], secrets: ["STAGING_TOKEN"] }],
+    });
+    expect(problems).toEqual([]);
+    expect(jobs.map((job) => job.name)).toEqual(["smoke", "smoke"]);
+    expect(jobs[1]?.secrets).toEqual(["STAGING_TOKEN"]);
+  });
+
   /** A problem names the line the author has to go and edit, not the portability name. */
   test("a malformed entry is reported under the key it was written in", () => {
     const { problems } = resolveChecks({ from_default_branch: [{ name: "Cloud Names", commands: ["x"] }] });
