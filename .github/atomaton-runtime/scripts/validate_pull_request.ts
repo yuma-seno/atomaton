@@ -2,7 +2,7 @@
 // @bun
 
 // src/entrypoints/machinery/validate_pull_request.ts
-import { appendFileSync as appendFileSync2, existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
+import { appendFileSync as appendFileSync2, existsSync as existsSync2, readFileSync as readFileSync3 } from "fs";
 import { parseArgs } from "util";
 
 // src/domain/work/pr-validation.ts
@@ -837,9 +837,56 @@ function holdHealed(repo, number, shaped) {
   return verdict === "release" ? { kind: "free" } : hold;
 }
 
+// src/entrypoints/machinery/lib/conflict-markers.ts
+import { readFileSync, readdirSync, statSync } from "fs";
+import { join, relative, sep } from "path";
+var START = /^<{7}(?: |$)/m;
+var END = /^>{7}(?: |$)/m;
+var SKIPPED_DIRS = new Set([".git", "node_modules"]);
+var MAX_BYTES = 8 * 1024 * 1024;
+function carriesConflictMarkers(text) {
+  return START.test(text) && END.test(text);
+}
+function fileCarriesMarkers(path) {
+  try {
+    if (statSync(path).size > MAX_BYTES)
+      return false;
+    const bytes = readFileSync(path);
+    if (bytes.includes(0))
+      return false;
+    return carriesConflictMarkers(bytes.toString("utf8"));
+  } catch {
+    return false;
+  }
+}
+function findConflictMarkers(root) {
+  const found = [];
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isSymbolicLink())
+        continue;
+      if (entry.isDirectory()) {
+        if (!SKIPPED_DIRS.has(entry.name))
+          walk(full);
+      } else if (entry.isFile() && fileCarriesMarkers(full)) {
+        found.push(relative(root, full).split(sep).join("/"));
+      }
+    }
+  };
+  walk(root);
+  return found.sort();
+}
+
 // src/entrypoints/machinery/extract_directive.ts
-import { existsSync, readFileSync, appendFileSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync as readFileSync2, appendFileSync } from "fs";
+import { join as join2 } from "path";
 
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
@@ -870,7 +917,7 @@ function defineScript(importMetaUrl) {
 var ref = defineScript(import.meta.url);
 var COMMAND_RE2 = new RegExp(`^\\/(${AGENT_NAME_PATTERN})$`);
 function hasAgentDefinition(name, defDir) {
-  return name !== "" && existsSync(join(defDir, `${name}.md`));
+  return name !== "" && existsSync(join2(defDir, `${name}.md`));
 }
 if (false)
   ;
@@ -918,6 +965,24 @@ function reportFailure(repo, number, runUrl, summary, details = []) {
   const posted = gh("issue", "comment", number, "--repo", repo, "--body", body);
   if (posted.code)
     log(`WARN could not post the failure comment: ${posted.stderr}`);
+}
+var LISTED_MARKERS = 20;
+function reportConflictMarkers(repo, number, markers, failingRunUrl) {
+  const shown = markers.slice(0, LISTED_MARKERS);
+  const rest = markers.length - shown.length;
+  const body = [
+    LLM_CONTEXT_TAG.write("include"),
+    "Atomaton: this pull request is waiting for its conflict markers to be resolved, so the checks on this tree are not a verdict on the work. Resolve them and push \u2014 the checks run their real judgement on the resolved tree.",
+    "",
+    "Files still carrying markers:",
+    ...shown.map((marker) => `- \`${marker}\``),
+    ...rest > 0 ? [`- ...and ${rest} more`] : [],
+    ...failingRunUrl ? ["", `Failing run: ${failingRunUrl}`] : []
+  ].join(`
+`);
+  const posted = gh("issue", "comment", number, "--repo", repo, "--body", body);
+  if (posted.code)
+    log(`WARN could not post the conflict-marker comment: ${posted.stderr}`);
 }
 function writeCheckRun(repo, headSha, name, conclusion) {
   const post = () => gh("api", "--method", "POST", `repos/${repo}/check-runs`, "-f", `name=${name}`, "-f", `head_sha=${headSha}`, "-f", "status=completed", "-f", `conclusion=${conclusion}`);
@@ -996,6 +1061,7 @@ function main() {
       workflow: { type: "string" },
       "def-dir": { type: "string" },
       "deliverable-report": { type: "string" },
+      "head-tree": { type: "string" },
       "asked-by-person": { type: "string" },
       "timeout-seconds": { type: "string" }
     }
@@ -1005,7 +1071,7 @@ function main() {
   const workflow = values.workflow ?? "";
   const defDir = values["def-dir"] ?? "";
   if (!repo || !branch || !workflow || !defDir) {
-    console.error("usage: validate_pull_request.ts --repo owner/name --number N --branch B --workflow W --def-dir DIR");
+    console.error("usage: validate_pull_request.ts --repo owner/name --number N --branch B --workflow W " + "--def-dir DIR --deliverable-report FILE --head-tree DIR");
     process.exit(1);
   }
   const reportPath = values["deliverable-report"] ?? "";
@@ -1017,9 +1083,18 @@ function main() {
     log(`cannot validate: no deliverable report at ${reportPath}`);
     process.exit(1);
   }
-  const deliverableProblems = readFileSync2(reportPath, "utf8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const deliverableProblems = readFileSync3(reportPath, "utf8").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   if (deliverableProblems.length > 0) {
     log(`the deliverable is inconsistent (${deliverableProblems.length} problem(s)); CI will not be dispatched`);
+  }
+  const headTree = values["head-tree"] ?? "";
+  if (!headTree || !existsSync2(headTree)) {
+    log(`cannot check for conflict markers: no pull request tree at ${headTree || "(nothing given)"}`);
+    process.exit(1);
+  }
+  const conflictMarkers = findConflictMarkers(headTree);
+  if (conflictMarkers.length > 0) {
+    log(`the pull request's tree carries conflict markers in ${conflictMarkers.length} file(s): ` + "the checks are reporting on a half-merged tree, not on the work");
   }
   const githubOutput = process.env.GITHUB_OUTPUT;
   const write = (line) => {
@@ -1071,7 +1146,9 @@ function main() {
   const conclusionForContexts = contextsPassed(outcome.verdict) ? "success" : "failure";
   for (const name of requiredContexts)
     writeCheckRun(repo, headSha, name, conclusionForContexts);
-  if (outcome.verdict !== "passed") {
+  if (conflictMarkers.length > 0) {
+    reportConflictMarkers(repo, values.number ?? "", conflictMarkers, outcome.verdict !== "passed" ? runUrl : "");
+  } else if (outcome.verdict !== "passed") {
     reportFailure(repo, values.number ?? "", runUrl, outcome.summary, deliverableProblems);
   }
   write(`next_agent=${outcome.next?.agent ?? ""}`);
