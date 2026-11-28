@@ -1846,7 +1846,7 @@
     },
     {
       "role": "user",
-      "content": "PR #657: Dispatch the update as the calling workflow's own token, not the update PAT\n**Labels:** atomaton/in-progress\n**Linked Issue:** #655\n\n/reviewer\n\nPart of #655\n## What changed\n\nBoth machinery dispatches that ran under `ATOMATON_UPDATE_TOKEN` now run under the calling workflow's own `GITHUB_TOKEN`:\n\n- `src/entrypoints/machinery/notify_new_release.ts:636` — `dispatchUpdate(repo, 0)`\n- `src/entrypoints/machinery/update_atomaton.ts:633` — `dispatchUpdateConflictAgent(repo, prNumber, conflictAgent)`\n\nThe `token` option they used to pass is gone from both functions, from `RunnerDispatch` (`src/adapters/actions/dispatch.ts`) and from `dispatchWorkflow` (`src/adapters/github/gh.ts:365`), which now builds one `gh workflow run` as the ambient `GH_TOKEN` and nothing else.\n\n`atomaton-new-release.yml` and `atomaton-update.yml` each gain `actions: write`. `checks: write` stays absent from both, so neither token can produce a check result — the checks the update's merge waits behind are started by the update token's push, exactly as before.\n\n## Why the conflict-agent side is in this pull request\n\nIssue #655's principle is \"separate the dispatch's success from the token\". `update_atomaton.ts` had the same defect: its `pr-agent` path dispatched `agents.on_update_conflict` with `{ token }`, so a repository configured as documented would get the same 403 there and leave the conflicted pull request standing for a person. Fixing only the notice would have left half the dispatch path broken, so both are here.\n\n## What this deliberately does not change\n\n- The update lane's writes — `push` (`update_atomaton.ts:312`), pull-request creation and `merge` (`update_atomaton.ts:595`) — still run as `ghAs(updateToken)`. A `GITHUB_TOKEN` push starts no checks, so the merge gate keeps depending on the PAT's identity.\n- `notify_new_release.ts` still reads the secret, for two jobs: the up-front \"is the update even possible\" check that writes the warning notice, and the `openPrForHead` read, which needs an identity the notice's own permission block does not grant (`pull-requests` is not declared).\n- `package.json`'s `version` is untouched; nothing under `dist/` is committed.\n\n## A judgement this overrides\n\nThe old contract test said, in as many words, that `actions: write` must **not** be added to `atomaton-new-release.yml`, and that the PAT was carried instead because widening the permission of the job that rewrites `.github/` is the bigger decision. That reasoning assumed the PAT could dispatch. Its documented scope has no `Actions`, so it could not, and the choice was between a permission that works and a secret that does not. #655 is the decision; `tests/contract/new-release-notice.test.ts` now records the permission set and the reason it changed, rather than the old prohibition.\n\n## Verification\n\n- `bun run typecheck` — exits 0.\n- `bun test` — `2641 pass`, `6 skip` (E2E, excluded by the run's own filter), `0 fail`.\n- `notify_new_release.test.ts`: `pr`/`pr-agent` with the secret → one dispatch to `atomaton-update.yml` and no notice; no secret → no dispatch, warning notice; an open update pull request → neither. Unchanged, and passing.\n- `update_atomaton.test.ts`: the `pr-agent` conflict cases still start `engineer` on the pull request, including when the update was started from a thread.\n- `gh.test.ts`: a dispatch now asserts it runs as the workflow's own `GH_TOKEN`, and that a refusal reads as `false` with a logged reason.\n- `dist/.github/workflows/atomaton-new-release.yml:18-21` and `atomaton-update.yml:21-26` carry `actions: write` after `bun run synth`.\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/46136457393)_\n",
+      "content": "PR #657: Dispatch the update as the calling workflow's own token, not the update PAT\n**Linked Issue:** #655\n\n/reviewer\n\nPart of #655\n## What changed\n\nBoth machinery dispatches that ran under `ATOMATON_UPDATE_TOKEN` now run under the calling workflow's own `GITHUB_TOKEN`:\n\n- `src/entrypoints/machinery/notify_new_release.ts:636` — `dispatchUpdate(repo, 0)`\n- `src/entrypoints/machinery/update_atomaton.ts:633` — `dispatchUpdateConflictAgent(repo, prNumber, conflictAgent)`\n\nThe `token` option they used to pass is gone from both functions, from `RunnerDispatch` (`src/adapters/actions/dispatch.ts`) and from `dispatchWorkflow` (`src/adapters/github/gh.ts:365`), which now builds one `gh workflow run` as the ambient `GH_TOKEN` and nothing else.\n\n`atomaton-new-release.yml` and `atomaton-update.yml` each gain `actions: write`. `checks: write` stays absent from both, so neither token can produce a check result — the checks the update's merge waits behind are started by the update token's push, exactly as before.\n\n## Why the conflict-agent side is in this pull request\n\nIssue #655's principle is \"separate the dispatch's success from the token\". `update_atomaton.ts` had the same defect: its `pr-agent` path dispatched `agents.on_update_conflict` with `{ token }`, so a repository configured as documented would get the same 403 there and leave the conflicted pull request standing for a person. Fixing only the notice would have left half the dispatch path broken, so both are here.\n\n## What this deliberately does not change\n\n- The update lane's writes — `push` (`update_atomaton.ts:312`), pull-request creation and `merge` (`update_atomaton.ts:595`) — still run as `ghAs(updateToken)`. A `GITHUB_TOKEN` push starts no checks, so the merge gate keeps depending on the PAT's identity.\n- `notify_new_release.ts` still reads the secret, for two jobs: the up-front \"is the update even possible\" check that writes the warning notice, and the `openPrForHead` read, which needs an identity the notice's own permission block does not grant (`pull-requests` is not declared).\n- `package.json`'s `version` is untouched; nothing under `dist/` is committed.\n\n## A judgement this overrides\n\nThe old contract test said, in as many words, that `actions: write` must **not** be added to `atomaton-new-release.yml`, and that the PAT was carried instead because widening the permission of the job that rewrites `.github/` is the bigger decision. That reasoning assumed the PAT could dispatch. Its documented scope has no `Actions`, so it could not, and the choice was between a permission that works and a secret that does not. #655 is the decision; `tests/contract/new-release-notice.test.ts` now records the permission set and the reason it changed, rather than the old prohibition.\n\n## Verification\n\n- `bun run typecheck` — exits 0.\n- `bun test` — `2641 pass`, `6 skip` (E2E, excluded by the run's own filter), `0 fail`.\n- `notify_new_release.test.ts`: `pr`/`pr-agent` with the secret → one dispatch to `atomaton-update.yml` and no notice; no secret → no dispatch, warning notice; an open update pull request → neither. Unchanged, and passing.\n- `update_atomaton.test.ts`: the `pr-agent` conflict cases still start `engineer` on the pull request, including when the update was started from a thread.\n- `gh.test.ts`: a dispatch now asserts it runs as the workflow's own `GH_TOKEN`, and that a refusal reads as `false` with a logged reason.\n- `dist/.github/workflows/atomaton-new-release.yml:18-21` and `atomaton-update.yml:21-26` carry `actions: write` after `bun run synth`.\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/46136457393)_\n",
       "atoma_metadata": {
         "author": "github-actions[bot]",
         "created_at": "2026-11-28T10:47:29Z",
@@ -1873,7 +1873,7 @@
       "content": "```diff\ndiff --git a/docs/runtime/tasks/move-to-a-newer-release.md b/docs/runtime/tasks/move-to-a-newer-release.md\nindex 9acab7ae..133d2a23 100644\n--- a/docs/runtime/tasks/move-to-a-newer-release.md\n+++ b/docs/runtime/tasks/move-to-a-newer-release.md\n@@ -83,7 +83,9 @@ The update cannot run without `ATOMATON_UPDATE_TOKEN`, a repository secret holdi\n a token with `repo` and `workflow` scope — or, fine-grained, `Contents` and\n `Pull requests` read and write, plus `Workflows` write. That is deliberate: a push\n made with the workflow's own token starts no checks, so a merge gated on them\n-would gate on nothing. The second scope is not optional: the release ships\n+would gate on nothing. Starting the update is not something this token does: the\n+notice workflow dispatches it with its own `GITHUB_TOKEN`, so `Actions` is not a\n+scope you need to add. The second scope is not optional: the release ships\n workflows, and GitHub refuses any push that changes a file under\n `.github/workflows/` without it. If the secret is missing the run fails loudly and\n changes nothing — set the secret and run it again.\ndiff --git a/src/adapters/actions/dispatch-targets.ts b/src/adapters/actions/dispatch-targets.ts\nindex 1c5c10c8..5f3a8ff2 100644\n--- a/src/adapters/actions/dispatch-targets.ts\n+++ b/src/adapters/actions/dispatch-targets.ts\n@@ -179,24 +179,12 @@ export function dispatchCi(branch: string): boolean {\n  * reports only where the machinery reports anyway: the pull request, and the\n  * notice when one stands open.\n  */\n-export function dispatchUpdate(\n-  repo: string,\n-  source: number,\n-  options: {\n-    /**\n-     * The update's own PAT, when the caller that noticed the release has no\n-     * `actions: write` to dispatch with. Passed by the new-release notice, whose\n-     * workflow declares `contents: read` and `issues: write` and nothing else.\n-     */\n-    token?: string;\n-  } = {},\n-): boolean {\n+export function dispatchUpdate(repo: string, source: number): boolean {\n   return dispatchWorkflow(\n     `dispatchUpdate: taking a newer release onto ${repo}`,\n     \"atomaton-update.yml\",\n     [\"--repo\", repo, \"-f\", `source=${source > 0 ? String(source) : \"\"}`],\n     log,\n-    options.token,\n   );\n }\n \n@@ -217,17 +205,11 @@ export function dispatchUpdate(\n  * post-merge re-invocation does it -- tagged `include`, because it is the first\n  * message the resolving agent reads and it is what tells it what to do.\n  */\n-export function dispatchUpdateConflictAgent(\n-  repo: string,\n-  prNumber: number,\n-  agent: string,\n-  options: { token?: string } = {},\n-): boolean {\n+export function dispatchUpdateConflictAgent(repo: string, prNumber: number, agent: string): boolean {\n   return (\n     dispatchDirective(repo, prNumber, agent, {\n       context: `the update pull request #${prNumber} stopped on a conflict, so ${agent} was to resolve it`,\n       type: \"pr\",\n-      ...(options.token === undefined ? {} : { token: options.token }),\n       directive:\n         \"Atomaton: this pull request takes a newer release onto this tree and stopped where the two \" +\n         \"sides disagree — the files listed above carry conflict markers naming both. Resolve them, \" +\ndiff --git a/src/adapters/actions/dispatch.ts b/src/adapters/actions/dispatch.ts\nindex 9afd3283..ee39bf7a 100644\n--- a/src/adapters/actions/dispatch.ts\n+++ b/src/adapters/actions/dispatch.ts\n@@ -225,16 +225,6 @@ export interface RunnerDispatch {\n    * nowhere else.\n    */\n   continuesChain?: boolean;\n-  /**\n-   * A token to dispatch as, when the caller's own token cannot start a run.\n-   *\n-   * Only the update lane passes one: `atomaton-update.yml` declares no `actions:\n-   * write`, so `gh workflow run` under its own token is refused, while the PAT it\n-   * already holds for the push and the merge starts runs. Omitted everywhere else,\n-   * which dispatches as the ambient `GH_TOKEN` -- what every other workflow here\n-   * already does.\n-   */\n-  token?: string;\n   /**\n    * The chain identity a hand-off dispatch carries, for the refusal that ends it (#194).\n    *\n@@ -766,7 +756,7 @@ export function dispatchRunner(d: RunnerDispatch): DispatchOutcome {\n     // Empty when a person or the machinery started the run -- see `dispatchedBy`.\n     \"--field\", `dispatched_by=${d.dispatchedBy ?? \"\"}`,\n   ];\n-  if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log, d.token)) {\n+  if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log)) {\n     // GitHub rejected the dispatch itself. For a hand-off this is the promise breaking\n     // like any other refusal (#194): the marker this dispatch posted is a phantom ask\n     // that nothing will ever claim, so it comes back down, and the ending goes up —\ndiff --git a/src/adapters/github/gh.test.ts b/src/adapters/github/gh.test.ts\nindex 9e1e28e4..32fad001 100644\n--- a/src/adapters/github/gh.test.ts\n+++ b/src/adapters/github/gh.test.ts\n@@ -1,16 +1,13 @@\n /**\n- * gh.test.ts — which identity a dispatch runs as.\n+ * gh.test.ts — a dispatch is one `gh workflow run`, as the ambient identity, and a\n+ * refusal is a `false` rather than a throw.\n  *\n- * `dispatchWorkflow` grew an optional `token` for one caller: the update lane's\n- * notice and conflict dispatch, which run in workflows that hold no `actions: write`\n- * and so cannot start a run with their own token. Everything else dispatches as the\n- * ambient `GH_TOKEN`, and must keep doing so.\n- *\n- * A dispatch is one `gh workflow run`, and there is nothing in this repository that\n- * can observe which token it carried — argv look identical either way. So this asks\n- * the fake `gh` for its own environment: the seam is one function deep (`ghAs` builds\n- * the child's env), and a test that skipped it would be asserting that a boolean was\n- * returned, which is the part that was never in doubt.\n+ * There is no token argument: every workflow that dispatches declares `actions:\n+ * write`, so the `GH_TOKEN` the workflow already holds is the one that starts the\n+ * run. That makes \"which identity\" a claim about the environment the child got, and\n+ * argv cannot show it — so this asks the fake `gh` for its own environment. A test\n+ * that skipped the seam would be asserting that a boolean was returned, which is the\n+ * part that was never in doubt.\n  */\n import { describe, expect, test } from \"bun:test\";\n import { mkdtempSync, readFileSync, rmSync, writeFileSync } from \"node:fs\";\n@@ -20,67 +17,63 @@ import { join } from \"node:path\";\n const GH = join(import.meta.dir, \"gh.ts\");\n \n /**\n- * Dispatch through the real module, with a fake `gh` that records what it was handed.\n+ * Dispatch through the real module, with a fake `gh` that records what it was handed\n+ * and then exits with `code`.\n  *\n  * The fake writes to a file rather than stdout: `gh.ts` captures the child's stdout as\n- * the command's answer, so what the fake prints never reaches this process.\n+ * the command's answer, so what the fake prints never reaches this process. The\n+ * module's log lines go to stderr, which this reads back whole.\n  */\n-function dispatch(token: string | undefined): { ok: boolean; token: string; argv: string[] } {\n+function dispatch(code = 0): { ok: boolean; token: string; argv: string[]; log: string } {\n   const dir = mkdtempSync(join(tmpdir(), \"gh-dispatch-\"));\n   const impl = join(dir, \"fake-gh.ts\");\n   const seen = join(dir, \"seen.json\");\n   writeFileSync(\n     impl,\n     'import { writeFileSync } from \"node:fs\";\\n' +\n-      `writeFileSync(${JSON.stringify(seen)}, JSON.stringify({ token: process.env.GH_TOKEN ?? \"\", argv: process.argv.slice(2) }));\\n`,\n+      `writeFileSync(${JSON.stringify(seen)}, JSON.stringify({ token: process.env.GH_TOKEN ?? \"\", argv: process.argv.slice(2) }));\\n` +\n+      `process.exit(${code});\\n`,\n   );\n   try {\n     const script = `\n       const { dispatchWorkflow } = await import(${JSON.stringify(GH)});\n-      const ok = dispatchWorkflow(\"ctx\", \"atomaton-runner.yml\", [\"--repo\", \"o/r\", \"--field\", \"agent=engineer\"], () => {}${\n-        token === undefined ? \"\" : `, ${JSON.stringify(token)}`\n-      });\n+      const ok = dispatchWorkflow(\n+        \"ctx\",\n+        \"atomaton-runner.yml\",\n+        [\"--repo\", \"o/r\", \"--field\", \"agent=engineer\"],\n+        (message) => process.stderr.write(message + \"\\\\n\"),\n+      );\n       process.stdout.write(JSON.stringify({ ok }));\n     `;\n     const proc = Bun.spawnSync({\n       cmd: [process.execPath, \"-e\", script],\n       stdout: \"pipe\",\n       stderr: \"pipe\",\n-      env: { ...process.env, ATOMATON_FAKE_GH: impl, GH_TOKEN: \"the-ambient-token\" },\n+      env: { ...process.env, ATOMATON_FAKE_GH: impl, GH_TOKEN: \"the-workflows-own-token\" },\n     });\n     if (proc.exitCode !== 0) throw new Error(proc.stderr.toString() || proc.stdout.toString());\n     const { ok } = JSON.parse(proc.stdout.toString()) as { ok: boolean };\n     const ran = JSON.parse(readFileSync(seen, \"utf8\")) as { token: string; argv: string[] };\n-    return { ok, ...ran };\n+    return { ok, log: proc.stderr.toString(), ...ran };\n   } finally {\n     rmSync(dir, { recursive: true, force: true });\n   }\n }\n \n describe(\"dispatchWorkflow\", () => {\n-  test(\"without a token it dispatches as the ambient one\", () => {\n-    const r = dispatch(undefined);\n-    expect(r.ok).toBe(true);\n-    expect(r.token).toBe(\"the-ambient-token\");\n-    expect(r.argv.slice(0, 3)).toEqual([\"workflow\", \"run\", \"atomaton-runner.yml\"]);\n-  });\n-\n-  /**\n-   * The one case the argument exists for: a workflow whose own token may not start a\n-   * run passes the PAT it already holds, and the child sees THAT as `GH_TOKEN` —\n-   * not the ambient one, which is the whole point.\n-   */\n-  test(\"with a token it dispatches as that identity instead\", () => {\n-    const r = dispatch(\"the-pat\");\n+  /** The workflow's own token is what starts the run — never one threaded in. */\n+  test(\"it dispatches as the workflow's own token\", () => {\n+    const r = dispatch();\n     expect(r.ok).toBe(true);\n-    expect(r.token).toBe(\"the-pat\");\n-    // The rest of the argv is unchanged: the token decides who, never what.\n+    expect(r.token).toBe(\"the-workflows-own-token\");\n     expect(r.argv.slice(0, 3)).toEqual([\"workflow\", \"run\", \"atomaton-runner.yml\"]);\n     expect(r.argv).toContain(\"agent=engineer\");\n   });\n \n-  /** Blank is absent: every existing caller passes nothing, and none passes \" \". */\n-  test(\"a blank token falls back to the ambient one\", () => {\n-    expect(dispatch(\"   \").token).toBe(\"the-ambient-token\");\n+  /** A refusal is the caller's to read, not an exception the run dies on. */\n+  test(\"a refused dispatch is `false`, and the reason is logged\", () => {\n+    const r = dispatch(1);\n+    expect(r.ok).toBe(false);\n+    expect(r.log).toContain(\"WARN failed to dispatch atomaton-runner.yml\");\n   });\n });\ndiff --git a/src/adapters/github/gh.ts b/src/adapters/github/gh.ts\nindex ab39c142..59b37541 100644\n--- a/src/adapters/github/gh.ts\n+++ b/src/adapters/github/gh.ts\n@@ -352,25 +352,26 @@ export function ghPaginated<T = unknown>(...args: string[]): T[] {\n  *\n  * `context` prefixes both messages so a log line still says who was dispatching.\n  *\n- * ## `token`, for the one caller whose own token cannot start a run\n+ * ## The identity is the calling workflow's own token\n  *\n- * Every caller but the release machinery dispatches as the ambient `GH_TOKEN`, which\n- * is right: whichever workflow holds it, `actions: write` is declared there. The\n- * update lane is the exception -- its workflow declares no `actions: write`, on\n- * purpose, because widening the permission of the job that rewrites `.github/` is a\n- * bigger decision than carrying a PAT for the one dispatch it needs. So the token is\n- * passed, through `ghAs`, and the env assembly is the same as the ambient path's:\n- * `ghAs` builds a per-process environment and lets it die with the process.\n+ * No caller passes one, and none should: every workflow that dispatches declares\n+ * `actions: write`, so the ambient `GH_TOKEN` it already holds can start a run —\n+ * `workflow_dispatch` is the documented exception that runs when `GITHUB_TOKEN` is\n+ * what asked for it, which is why it is how this system replaces the events GitHub\n+ * suppressed (see `dispatch-targets.ts`). A workflow whose own token could not start\n+ * one would be declaring the wrong permission, and the fix belongs in its\n+ * `permissions` block rather than in a PAT threaded through here — a PAT reaches a\n+ * call site and the permission reaches the job, and only the second is visible to\n+ * whoever reads the workflow.\n  */\n export function dispatchWorkflow(\n   context: string,\n   workflow: string,\n   args: string[] = [],\n   log: (message: string) => void = (m) => console.error(m),\n-  token = \"\",\n ): boolean {\n   const argv = [\"workflow\", \"run\", workflow, ...args];\n-  const { code, stdout, stderr } = token.trim() ? ghAs(token.trim(), ...argv) : gh(...argv);\n+  const { code, stdout, stderr } = gh(...argv);\n   if (code) {\n     log(`${context}: WARN failed to dispatch ${workflow}: ${stderr || stdout}`);\n     return false;\ndiff --git a/src/entrypoints/machinery/lib/open-pull-request.ts b/src/entrypoints/machinery/lib/open-pull-request.ts\nindex e265e2ac..d4a9dc34 100644\n--- a/src/entrypoints/machinery/lib/open-pull-request.ts\n+++ b/src/entrypoints/machinery/lib/open-pull-request.ts\n@@ -14,12 +14,12 @@\n  *\n  * `token` is the update lane's PAT, and the notice must pass it. A workflow that\n  * declares `permissions` gets `none` for every scope it does not list, and\n- * `atomaton-new-release.yml` lists `contents` and `issues` only: on a private\n- * repository its own token cannot list pull requests at all. The refusal would come\n- * back as this function's `0` -- \"no pull request is open\" -- and the cron would\n- * dispatch the same update every day for as long as the release is waiting. Reading\n- * as the identity that may is cheaper than the alternative, which is adding\n- * `pull-requests: read` to the permissions of the workflow that writes the notice.\n+ * `atomaton-new-release.yml` declares no `pull-requests`: on a private repository its\n+ * own token cannot list pull requests at all. The refusal would come back as this\n+ * function's `0` -- \"no pull request is open\" -- and the cron would dispatch the same\n+ * update every day for as long as the release is waiting. Reading as the identity that\n+ * may is cheaper than the alternative, which is adding `pull-requests: read` to the\n+ * permissions of the workflow that writes the notice.\n  */\n import { ghAs, ghRead } from \"../../../adapters/github/gh.ts\";\n \ndiff --git a/src/entrypoints/machinery/notify_new_release.ts b/src/entrypoints/machinery/notify_new_release.ts\nindex f6249433..671832e1 100644\n--- a/src/entrypoints/machinery/notify_new_release.ts\n+++ b/src/entrypoints/machinery/notify_new_release.ts\n@@ -609,15 +609,22 @@ function main(): void {\n       log(`WARN update.on_new_release is ${mode}, but ATOMATON_UPDATE_TOKEN is not set — nothing was started`);\n       autoUpdateFailure = {\n         mode,\n-        why: \"no `ATOMATON_UPDATE_TOKEN` secret is set here, and this workflow's own token may not start a run\",\n+        why:\n+          \"no `ATOMATON_UPDATE_TOKEN` secret is set here, and the update cannot push, open \" +\n+          \"its pull request or merge without it\",\n       };\n     } else {\n-      // As the update's PAT, not this workflow's own token: `atomaton-new-release.yml`\n-      // declares `contents: read` and `issues: write`, and a scope a workflow does not\n-      // list is `none` -- so a private repository refuses this read to the notice, and\n-      // a refused read is the answer \"no update pull request is open\". That answer\n-      // dispatches, so the refusal would cost one update run and one re-push per day\n-      // for as long as the release waits on its pull request.\n+      // Read as the update's PAT, not this workflow's own token: `atomaton-new-release.yml`\n+      // declares no `pull-requests`, and a scope a workflow does not list is `none` -- so a\n+      // private repository refuses this read to the notice, and a refused read is the answer\n+      // \"no update pull request is open\". That answer dispatches, so the refusal would cost\n+      // one update run and one re-push per day for as long as the release waits on its pull\n+      // request.\n+      //\n+      // The dispatch below is not part of that: it runs as this workflow's own token, the\n+      // way every other dispatch here does, and the `actions: write` that makes it work is\n+      // in the workflow's permission block where a reader can see it. The secret is what\n+      // the update then pushes, opens its pull request and merges with.\n       const open = openPrForHead(repo, updateBranchFor(latest.tag), updateToken);\n       if (open > 0) {\n         // The update is already under way, and its pull request is the thread its\n@@ -626,7 +633,7 @@ function main(): void {\n         log(`an update pull request for ${latest.tag} (#${open}) is already open; nothing was started`);\n         return;\n       }\n-      if (dispatchUpdate(repo, 0, { token: updateToken })) {\n+      if (dispatchUpdate(repo, 0)) {\n         // `source` is empty, so this is the Actions-button run: no thread asked for it,\n         // and the pull request it opens is where everything is reported.\n         log(`started the update to ${latest.tag}; its report lands on the pull request it opens`);\ndiff --git a/src/entrypoints/machinery/update_atomaton.ts b/src/entrypoints/machinery/update_atomaton.ts\nindex 987de4d5..27eb43fa 100644\n--- a/src/entrypoints/machinery/update_atomaton.ts\n+++ b/src/entrypoints/machinery/update_atomaton.ts\n@@ -630,7 +630,7 @@ function main(): void {\n         ? null\n         : {\n             agent: conflictAgent,\n-            started: dispatchUpdateConflictAgent(repo, prNumber, conflictAgent, { token }),\n+            started: dispatchUpdateConflictAgent(repo, prNumber, conflictAgent),\n           };\n     if (resolution !== null && !resolution.started) {\n       log(`WARN could not start ${conflictAgent} on #${prNumber}; the pull request stands for a person`);\ndiff --git a/src/workflows/atomaton-new-release.wac.ts b/src/workflows/atomaton-new-release.wac.ts\nindex ddfd3c68..2043ea53 100644\n--- a/src/workflows/atomaton-new-release.wac.ts\n+++ b/src/workflows/atomaton-new-release.wac.ts\n@@ -19,18 +19,26 @@ import { ref as notifyNewReleaseRef } from \"../entrypoints/machinery/notify_new_\n // ## What it needs\n //\n // `contents: read` to read the releases and the manifest at the tag, `issues: write`\n-// to open the notice -- and nothing else in the way of permissions, no GitHub App and\n-// no branch protection. That is the whole reason this ships before the sync half of\n-// the same problem: an upgrade nobody knows about is the first barrier, and it can be\n-// removed without asking an adopter to configure anything.\n+// to open the notice, and `actions: write` to start the update when the repository\n+// asked for one. No GitHub App and no branch protection -- which is the whole reason\n+// this ships before the sync half of the same problem: an upgrade nobody knows about\n+// is the first barrier, and it can be removed without asking an adopter to configure\n+// anything.\n+//\n+// `actions: write` is what makes the dispatch below this run's own doing rather than\n+// a thing borrowed from a secret, and `workflow_dispatch` is the documented exception\n+// that runs even when `GITHUB_TOKEN` is what asked for it -- the same shape as every\n+// other dispatch the machinery makes. It does not widen the gate the update's merge\n+// waits behind: `checks: write` is absent, so this token cannot produce a check\n+// result, and the checks that gate the merge are started by the update token's push.\n //\n // One secret is READ, and only for the project that asked for it: with\n // `update.on_new_release` set to `pr` or `pr-agent` the notice dispatches the update\n-// workflow, and this workflow's own token may not start a run (`actions: write` is\n-// not declared here and will not be -- widening the permission of the job that\n-// rewrites `.github/` is a bigger decision than carrying the PAT that already exists\n-// for this lane). The secret is empty in a repository that never set it, which is\n-// exactly the default mode: `issue` reads it, sees nothing, and dispatches nothing.\n+// workflow, and `ATOMATON_UPDATE_TOKEN` is what that run then pushes, opens its pull\n+// request and merges with -- and what this notice reads an open pull request as,\n+// since no `pull-requests` is declared here. A token without `Actions` is enough for\n+// all of that. The secret is empty in a repository that never set it, which is exactly\n+// the default mode: `issue` reads it, sees nothing, and dispatches nothing.\n //\n // ## In this repository it is a no-op\n //\n@@ -59,11 +67,12 @@ export const atomaNewRelease = new Workflow(\"atomaton-new-release\", {\n   },\n   // The narrowest permission set any generated workflow here declares, and the\n   // point of shipping this half first. Constant rather than `ATOMATON_WORKFLOW_-\n-  // PERMISSIONS`: this run starts no agent, writes no pull request, and dispatches\n-  // nothing, so none of that token can be spent by it. `actions` is here because\n-  // every generated workflow declares it and removing it from one file would be a\n-  // second opinion about the shape -- see the note in that module.\n-  permissions: { contents: \"read\", issues: \"write\" },\n+  // PERMISSIONS`: this run starts no agent and writes no pull request, so none of\n+  // that token can be spent by it. `actions` is what starts the update workflow it\n+  // announces, and it is in the same set every other dispatching workflow declares\n+  // -- `workflow_dispatch` is the exception `GITHUB_TOKEN` can make. `checks: write`\n+  // stays absent, so nothing here can produce a check result.\n+  permissions: { contents: \"read\", issues: \"write\", actions: \"write\" },\n }).addJobs(\n   startJob(\n     \"notify\",\ndiff --git a/src/workflows/atomaton-update.wac.ts b/src/workflows/atomaton-update.wac.ts\nindex 09ab8692..ac3fd3fa 100644\n--- a/src/workflows/atomaton-update.wac.ts\n+++ b/src/workflows/atomaton-update.wac.ts\n@@ -52,19 +52,23 @@ export const atomaUpdate = new Workflow(\"atomaton-update\", {\n       },\n     },\n   },\n-  // Narrower than ATOMATON_WORKFLOW_PERMISSIONS and deliberately so: this run\n-  // starts no agent and dispatches nothing. `pull-requests` is what editing the\n-  // update's pull request needs; `issues` is the notice it answers and closes;\n-  // `checks: read` is the rollup and watch its merge waits behind -- a private\n-  // repository refuses that read to a job without it, and the refusal would\n-  // land in the WARN branch, a pull request left standing instead of an error;\n-  // `contents: read` is the checkout and the releases it reads. The writes that\n-  // decide anything -- the push, the pull request's opening, the merge -- travel\n+  // Narrower than ATOMATON_WORKFLOW_PERMISSIONS and deliberately so. `pull-requests`\n+  // is what editing the update's pull request needs; `issues` is the notice it\n+  // answers and closes; `checks: read` is the rollup and watch its merge waits\n+  // behind -- a private repository refuses that read to a job without it, and the\n+  // refusal would land in the WARN branch, a pull request left standing instead of\n+  // an error; `contents: read` is the checkout and the releases it reads. The writes\n+  // that decide anything -- the push, the pull request's opening, the merge -- travel\n   // under the update token, which this workflow's permission block neither grants\n-  // nor limits. That is the point: the checks the merge is gated on are started\n-  // by the token's identity, so this workflow's own permissions cannot widen the\n-  // gate.\n-  permissions: { contents: \"read\", issues: \"write\", \"pull-requests\": \"write\", checks: \"read\" },\n+  // nor limits. That is the point: the checks the merge is gated on are started by\n+  // the token's identity, so this workflow's own permissions cannot widen the gate.\n+  //\n+  // `actions` is here for the one dispatch this run makes: with\n+  // `update.on_new_release: pr-agent` it starts `agents.on_update_conflict` on the\n+  // pull request that stopped on a conflict. That is not a way around the paragraph\n+  // above: `checks: write` stays absent, so this token cannot make a check result,\n+  // while the checks the merge waits on are started by the update token's push.\n+  permissions: { contents: \"read\", issues: \"write\", \"pull-requests\": \"write\", checks: \"read\", actions: \"write\" },\n   concurrency: { group: \"atomaton-update\", \"cancel-in-progress\": false },\n }).addJobs(\n   startJob(\ndiff --git a/tests/contract/new-release-notice.test.ts b/tests/contract/new-release-notice.test.ts\nindex 7cc8d858..18219538 100644\n--- a/tests/contract/new-release-notice.test.ts\n+++ b/tests/contract/new-release-notice.test.ts\n@@ -9,9 +9,11 @@\n  * edit away from being lost and none of them fail loudly:\n  *\n  * - **the permission set.** Broadening it costs nothing visible. `contents: read` +\n- *   `issues: write` is also the whole argument for shipping this half of the\n- *   upgrade problem before the sync half, so losing it silently withdraws the\n- *   reason.\n+ *   `issues: write` + `actions: write` is also the whole argument for shipping this\n+ *   half of the upgrade problem before the sync half, so losing it silently withdraws\n+ *   the reason: `actions` is what starts the update workflow the notice announces,\n+ *   and `checks: write` is what it must never hold, because that is the permission\n+ *   that could produce a check result of its own.\n  * - **no dispatch of its own, and no checkout of anything else.** The notice is a\n  *   read of two release tags, one issue write, and -- only for a repository that\n  *   asked -- one dispatch through `dispatchUpdate`. Anything that runs `gh workflow\n@@ -60,12 +62,21 @@ describe(\"the new-release notice\", () => {\n   });\n \n   /**\n-   * The permission set, exactly. Read on releases and write on issues is the whole\n-   * of what the notice needs, and it is what makes this shippable without asking an\n-   * adopter for a secret.\n+   * The permission set, exactly. Read on releases, write on issues, and `actions:\n+   * write` to start the update workflow — that is the whole of what the notice needs,\n+   * and the third is the one this test used to forbid.\n+   *\n+   * It forbade it because the dispatch used to run as the update's PAT instead, and\n+   * the argument then was that widening the permission of the job that rewrites\n+   * `.github/` is a bigger decision than carrying a token that already exists. The\n+   * token turned out not to have `Actions` in its documented scope — `Contents`,\n+   * `Pull requests`, `Workflows` — so a repository set up as documented got a 403 on\n+   * every dispatch, and the notice it fell back to said the update had not been\n+   * started. `workflow_dispatch` is the documented exception a `GITHUB_TOKEN` can\n+   * still make, which is why every other machinery dispatch already works this way.\n    */\n-  test(\"it holds `contents: read` and `issues: write` and nothing else\", () => {\n-    expect(document.permissions).toEqual({ contents: \"read\", issues: \"write\" });\n+  test(\"it holds `contents: read`, `issues: write` and `actions: write` and nothing else\", () => {\n+    expect(document.permissions).toEqual({ contents: \"read\", issues: \"write\", actions: \"write\" });\n   });\n \n   test(\"one job, bounded\", () => {\n@@ -114,11 +125,13 @@ describe(\"the new-release notice\", () => {\n    *\n    * The ordering this half exists to protect is unchanged: a repository that\n    * configures nothing is told there is an upgrade with no secret at all. What the\n-   * PAT buys is the dispatch that `update.on_new_release: pr` asks for, and this\n-   * workflow cannot start a run with its own token -- `actions: write` is not in the\n-   * permission set above and must not be added for this. So the secret travels\n-   * inside the step's env, where the script reads it and can say \"nothing was\n-   * started\" instead of failing.\n+   * PAT buys is no longer the dispatch -- the workflow's own `actions: write` starts\n+   * the run, so a PAT without `Actions` in its scope is enough -- but the update the\n+   * dispatch starts, which pushes, opens its pull request and merges only as that\n+   * identity, and the pull-request read this notice makes along `openPrForHead`,\n+   * which its permission block does not grant. So the secret travels inside the\n+   * step's env, where the script reads it and can say \"nothing was started\" instead\n+   * of failing.\n    *\n    * Named exactly, because a second secret here would be a second thing an adopter\n    * has to mint before being told about a release.\ndiff --git a/tests/contract/update-workflow.test.ts b/tests/contract/update-workflow.test.ts\nnew file mode 100644\nindex 00000000..6be726c0\n--- /dev/null\n+++ b/tests/contract/update-workflow.test.ts\n@@ -0,0 +1,35 @@\n+/**\n+ * update-workflow.test.ts — the update workflow's permission set, pinned.\n+ *\n+ * `update.on_new_release: pr-agent` makes this run start the agent that resolves the\n+ * pull request a collision stopped it at, and `workflow_dispatch` is the exception a\n+ * `GITHUB_TOKEN` can still make — so `actions: write` is what makes that dispatch\n+ * work. Nothing fails loudly when it goes missing: the run logs a WARN and leaves the\n+ * pull request standing for a person, which is exactly the outcome a repository that\n+ * asked for `pr-agent` did not ask for. That silence is why the set is pinned here\n+ * rather than left to the prose in `src/workflows/atomaton-update.wac.ts`;\n+ * `new-release-notice.test.ts` holds the same pin for the notice's own dispatch.\n+ *\n+ * `checks: write` must stay absent, and it is the key somebody could add innocently:\n+ * it is what would let this job produce a check result of its own, and the checks the\n+ * merge waits behind would stop being the ones the update token's push started.\n+ */\n+import { describe, expect, te\n```\n\n*[Diff truncated at 30000 characters due to size]*",
       "atoma_metadata": {
         "author": "github",
-        "created_at": "2026-11-28T11:46:02Z",
+        "created_at": "2026-11-28T11:46:30Z",
         "event_type": "pr_diff",
         "id": "pr-657-diff",
         "layer": "github-context",
@@ -2925,7 +2925,7 @@
     },
     {
       "role": "user",
-      "content": "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what this issue asked for. Say which acceptance criteria are met and which are not; conclude the issue when they are met, and carry on with the work when they are not.",
+      "content": "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what this issue asked for. Say which acceptance criteria are met and which are not; conclude the issue when they are met, and carry on with the work when they are not.\n",
       "atoma_metadata": {
         "author": "github-actions[bot]",
         "created_at": "2026-11-28T11:45:53Z",
@@ -3358,14 +3358,298 @@
       "role": "tool",
       "content": "{\"number\":664,\"url\":\"https://github.com/yuma-seno/atomaton/pull/664\",\"base\":\"\",\"validation_dispatched\":true}",
       "tool_call_id": "chatcmpl-tool-998bc5896fee4dc6"
+    },
+    {
+      "role": "user",
+      "content": "PR #664: Drop the last token threaded toward a dispatch\n**Labels:** atomaton/in-progress\n**Linked Issue:** #655\n\n/reviewer\n\nPart of #655\n## What changed\n\n`src/adapters/actions/dispatch-targets.ts:477-483` and `:498` — `dispatchDirective`'s `token?: string` option and the spread that forwarded it into `dispatchRunner` are gone.\n\nThis is the remainder of #655. Its acceptance criterion 3 was that no token is handed toward a dispatch:\n\n```\ngrep -rn '{ token' src/entrypoints/machinery/notify_new_release.ts \\\n  src/entrypoints/machinery/update_atomaton.ts src/adapters/actions/\n```\n\nBefore this commit that grep still matched `src/adapters/actions/dispatch-targets.ts:500` — `...(request.token === undefined ? {} : { token: request.token })` — so the criterion was not met by PR #657.\n\n## Why it survived review and CI\n\n`RunnerDispatch` has no `token` field any more, so `token:` written directly into that object literal is a type error. A property brought in by a **spread** is not excess-checked, so the same mistake typechecks and is then ignored at runtime by `dispatchRunner`. No caller passes one, and it changed no behaviour — which is exactly why nothing failed.\n\n## Acceptance criteria of #655, against `main`\n\n| criterion | state |\n| --- | --- |\n| `bun run typecheck` passes | passes, exit 0 |\n| `bun test` passes, including the named contract and script tests | `2671 pass`, `6 skip`, `0 fail` |\n| no `{ token` at a dispatch call site | met by this commit (the grep above returns nothing) |\n| `atomaton-new-release.yml` and `atomaton-update.yml` declare `actions: write` | met on `main` — `dist/.github/workflows/atomaton-new-release.yml:18-21`, `atomaton-update.yml:21-26` after `bun run synth` |\n| the PR body records the conflict-agent sync and the overridden prohibition | recorded in #657 |\n\nThe `apply-to-self` dispatch that review found outside the diff is on `main` too: `.github/workflows/release.yml:648` carries `actions: write`, from PR #660.\n\n## Verification\n\n- `bun run typecheck` — exit 0.\n- `bun test` — `2671 pass`, `6 skip`, `0 fail`, 208 files.\n- `grep -rn '{ token' src/entrypoints/machinery/notify_new_release.ts src/entrypoints/machinery/update_atomaton.ts src/adapters/actions/` — no match.\n- `git diff --stat` — one file, two deletions.\n\nNothing outside `src/adapters/actions/dispatch-targets.ts` changed, so this does not touch `package.json`'s version or anything under `dist/`.\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/46141408433)_\n",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-28T11:49:32Z",
+        "event_type": "pr_opened",
+        "id": "pr-664",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what this issue asked for. Say which acceptance criteria are met and which are not; conclude the issue when they are met, and carry on with the work when they are not.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-28T11:54:25Z",
+        "event_type": "issue_comment",
+        "id": 7238860754,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "PR #664 をマージしました。`dispatchDirective` の `token?: string` と、それを `dispatchRunner` へ転送していた spread が消え、`token?:` はリポジトリ全体で0件になりました。これで #655 の受け入れ条件3（dispatch にトークンを渡す箇所がない）が満たされています。\n\nこの PR が消したのは、前回のレビューで「何に使われているか読めていない」と書いた `dispatch-targets.ts` の `token?: string` そのものでした。`dispatchUpdate` と `dispatchUpdateConflictAgent` はすでに token を取らず、残っていたのは `dispatchDirective` の未使用オプションと、`RunnerDispatch` に存在しないフィールドを spread で混ぜる1行だけでした。\n\n<details><summary>根拠（grep、呼び出し箇所、CI、マージ結果）</summary>\n\n- `grep 'token\\?:'` — ツリー全体で該当なし。\n- `dispatchDirective(` の呼び出しは `src/adapters/actions/dispatch-targets.ts:149`, `:218`, `:401`, `:451` の4箇所で、いずれも token を渡していません。型から消えたので、直接渡せば型エラーになります。\n- head の check runs は `atomaton-check` を含めすべて success。`check_merge_readiness(664)` は `ready: true`、blockers なし。\n- `merge_pr` の戻りは `{\"merged\":true, ... \"parent_issue\":655, \"parent_outcome\":\"reinvoked\", \"invoked_agent\":\"engineer\"}`。\n\n</details>\n\n**確かめられなかったこと**\n\n- `bun test` と `bun run typecheck` は実行していません（この run にシェルがありません）。裏付けは head の check runs と `check_merge_readiness` です。\n- この PR は「`token?:` が戻らないこと」を固定するテストを追加していません。spread 経由で戻すと同じように型検査を通ってしまうので、#655 の受け入れ条件にある grep は手で回すしかありません。今回の欠陥はそれで見つかったものなので、必要なら別 Issue の価値はあります。\n- #655 を閉じるかどうかはこの run では決められません（ノードは PR #664）。マージにより #655 は engineer に再 invoke されています。\n\n**次の一手**\n\n1. engineer が #655 の受け入れ条件を最終確認し、満たしていれば #655 を閉じる。\n2. 人が必要な作業は残っていません。\n\n\n---\n_Tokens: 922717 total (915143 prompt + 7574 completion, 552960 of the prompt cached)_\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/46141937129) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-28T11:54:32Z",
+        "event_type": "pr_comment",
+        "id": 7238862147,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "```diff\ndiff --git a/src/adapters/actions/dispatch-targets.ts b/src/adapters/actions/dispatch-targets.ts\nindex f8ff26a4..4704fe46 100644\n--- a/src/adapters/actions/dispatch-targets.ts\n+++ b/src/adapters/actions/dispatch-targets.ts\n@@ -479,7 +479,6 @@ function dispatchDirective(\n     directive: string;\n     notify?: string;\n     type?: \"issue\" | \"pr\";\n-    token?: string;\n     continuesChain?: boolean;\n   },\n ): DispatchOutcome {\n@@ -497,7 +496,6 @@ function dispatchDirective(\n     notify: request.notify ?? \"\",\n     repo,\n     markerCommentId,\n-    ...(request.token === undefined ? {} : { token: request.token }),\n     ...(request.continuesChain === true ? { continuesChain: true } : {}),\n     log,\n   });\n```",
+      "atoma_metadata": {
+        "author": "github",
+        "created_at": "2026-11-28T11:54:33Z",
+        "event_type": "pr_diff",
+        "id": "pr-664-diff",
+        "layer": "github-context",
+        "sha": "43c63f44",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "content": "PR #664 merged. Let me verify the full acceptance criteria against `main` before concluding.\n\n\n\n",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-99c31b8401311a7f",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"git log --oneline -3; echo ===; git branch --show-current; echo ===; git status --short\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-b1c2967d40f338b6",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"echo \\\"--- token?: anywhere ---\\\"; grep -rn \\\"token?:\\\" src --include=*.ts || echo none\\necho \\\"--- { token at dispatch sites ---\\\"; grep -rn \\\"{ token\\\" src/entrypoints/machinery/notify_new_release.ts src/entrypoints/machinery/update_atomaton.ts src/adapters/actions/ || echo none\\necho \\\"--- dispatchUpdate / conflict call sites ---\\\"; grep -rn \\\"dispatchUpdate(\\\\|dispatchUpdateConflictAgent(\\\" src --include=*.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "PR #664 merged. Now I'm re-invoked on issue #655 to judge whether what merged satisfies the issue.\n\nI need to verify on main:\n1. typecheck\n2. full tests\n3. grep `token?:` and `{ token` at dispatch sites — empty\n4. dist permissions have actions: write for both workflows\n5. release.yml apply-to-self has actions: write\n\nIf all met → request_close_issue.\n\nLet me verify, not assume. Check current branch/state.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_c74bff84-8eb5-453c-aaa0-032a3f56ef95",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"b133a91 Merge pull request #664 from yuma-seno/atomaton/issue-655\\n===\\nmain\\n===\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":488}",
+      "tool_call_id": "chatcmpl-tool-99c31b8401311a7f"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"--- token?: anywhere ---\\nnone\\n--- { token at dispatch sites ---\\nnone\\n--- dispatchUpdate / conflict call sites ---\\nsrc/adapters/actions/dispatch-targets.ts:182:export function dispatchUpdate(repo: string, source: number): boolean {\\nsrc/adapters/actions/dispatch-targets.ts:216:export function dispatchUpdateConflictAgent(repo: string, prNumber: number, agent: string): boolean {\\nsrc/entrypoints/machinery/dispatch_update.ts:49:  const sent = dispatchUpdate(repo, Number.isInteger(source) ? source : 0);\\nsrc/entrypoints/machinery/update_atomaton.ts:636:            started: dispatchUpdateConflictAgent(repo, prNumber, conflictAgent),\\nsrc/entrypoints/machinery/notify_new_release.ts:636:      if (dispatchUpdate(repo, 0)) {\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":201}",
+      "tool_call_id": "chatcmpl-tool-b1c2967d40f338b6"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8233ca1a7fc2783b",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"bun run typecheck 2>&1 | tail -3\", \"timeout_seconds\": 300}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-80ba49c09de68c6b",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"bun run synth >/dev/null 2>&1; grep -n -A 5 \\\"^permissions\\\" dist/.github/workflows/atomaton-new-release.yml dist/.github/workflows/atomaton-update.yml; echo \\\"--- release.yml apply-to-self ---\\\"; awk 'NR>=639 && NR<=650 {printf \\\"%d\\\\t%s\\\\n\\\", NR, $0}' .github/workflows/release.yml\", \"timeout_seconds\": 300}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"$ tsc --noEmit\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":4541}",
+      "tool_call_id": "chatcmpl-tool-8233ca1a7fc2783b"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"dist/.github/workflows/atomaton-new-release.yml:18:permissions:\\ndist/.github/workflows/atomaton-new-release.yml-19-  contents: read\\ndist/.github/workflows/atomaton-new-release.yml-20-  issues: write\\ndist/.github/workflows/atomaton-new-release.yml-21-  actions: write\\ndist/.github/workflows/atomaton-new-release.yml-22-jobs:\\ndist/.github/workflows/atomaton-new-release.yml-23-  notify:\\n--\\ndist/.github/workflows/atomaton-update.yml:21:permissions:\\ndist/.github/workflows/atomaton-update.yml-22-  contents: read\\ndist/.github/workflows/atomaton-update.yml-23-  issues: write\\ndist/.github/workflows/atomaton-update.yml-24-  pull-requests: write\\ndist/.github/workflows/atomaton-update.yml-25-  checks: read\\ndist/.github/workflows/atomaton-update.yml-26-  actions: write\\n--- release.yml apply-to-self ---\\n639\\t    permissions:\\n640\\t      contents: read\\n641\\t      pull-requests: write\\n642\\t      issues: write\\n643\\t      # The update script reads the rollup and watches the checks its merge waits\\n644\\t      # behind; a private repository refuses that read to a job without it -- and\\n645\\t      # here the refusal would not fail loudly, it would land in the WARN branch\\n646\\t      # and leave the update pull request standing.\\n647\\t      checks: read\\n648\\t      actions: write\\n649\\t    steps:\\n650\\t      # `main`, and not the dispatch's commit: the version-bump commit this run\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":733}",
+      "tool_call_id": "chatcmpl-tool-80ba49c09de68c6b"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-95fd7d2524728468",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"bun test 2>&1 | tail -8\", \"timeout_seconds\": 1800}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "All structural criteria hold on main. Now run the full test suite to confirm criterion 2 (and specifically the named tests).\n\nLet me run the named ones plus the full suite.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_816f09a3-e41a-48a9-ba7e-8abdcb205c7d",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(skip) E2E: real atoma binary + real mcp/github.ts > agent calls get_issue through the real MCP server\\n(skip) E2E: real atoma binary + real mcp/github.ts > agent dynamically loads a built-in skill into ordinary tool history\\n\\n 2671 pass\\n 6 skip\\n 0 fail\\n 8182 expect() calls\\nRan 2677 tests across 208 files. [130.91s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":131126}",
+      "tool_call_id": "chatcmpl-tool-95fd7d2524728468"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8a2845da463e17c6",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"grep -n -A 4 \\\"^permissions\\\" .github/workflows/atomaton-new-release.yml .github/workflows/atomaton-update.yml 2>/dev/null; echo \\\"--- deployed runtime gh.ts dispatchWorkflow ---\\\"; grep -n \\\"token = \\\\\\\"\\\\\\\"\\\\|token.trim()\\\" .github/atomaton-runtime/adapters/github/gh.ts 2>/dev/null | head -5\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "All 2671 pass, 0 fail on main@b133a91.\n\nLet me also confirm the two named contract tests specifically exist and pass — they ran as part of the suite; the count is identical to my pre-PR run (2671). The named ones: new-release-notice (permissions assert with actions), notify_new_release.test.ts, update_atomaton.test.ts. They're inside the suite.\n\nOne more consideration: the issue's criterion 4 says `dist/.../atomaton-new-release.yml` and `atomaton-update.yml` have actions: write — verified ✓.\n\nCriterion 5: PR body records the conflict-agent sync and the overridden prohibition — recorded in #657's body (I wrote both sections). ✓\n\nAlso the core issue: the notice's dispatch now runs as the workflow's own token → notify_new_release.ts:636 `dispatchUpdate(repo, 0)` ✓; permissions declare actions: write ✓.\n\nAlso `apply-to-self` #660 landed ✓.\n\nOne outstanding item I should be honest about: this repository's deployed `.github/workflows/atomaton-*.yml` and `.github/atomaton-runtime/` still carry the old code/permissions until the next release is applied — so the fix reaches adopters and this repository's own installed workflows via the next release (the update machinery). Let me verify current deployed state to state it accurately.\n\nCheck .github/workflows/atomaton-new-release.yml permissions and whether .github/atomaton-runtime has the old dispatchWorkflow (it will until a release application).\n\nLet me check quickly.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_d9019a46-d1e1-44b9-adc7-0f5df8645020",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\".github/workflows/atomaton-new-release.yml:18:permissions:\\n.github/workflows/atomaton-new-release.yml-19-  contents: read\\n.github/workflows/atomaton-new-release.yml-20-  issues: write\\n.github/workflows/atomaton-new-release.yml-21-jobs:\\n.github/workflows/atomaton-new-release.yml-22-  notify:\\n--\\n.github/workflows/atomaton-update.yml:21:permissions:\\n.github/workflows/atomaton-update.yml-22-  contents: read\\n.github/workflows/atomaton-update.yml-23-  issues: write\\n.github/workflows/atomaton-update.yml-24-  pull-requests: write\\n.github/workflows/atomaton-update.yml-25-  checks: read\\n--- deployed runtime gh.ts dispatchWorkflow ---\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":185}",
+      "tool_call_id": "chatcmpl-tool-8a2845da463e17c6"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8e86029379cb4469",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"ls .github/atomaton-runtime 2>/dev/null | head -5; echo ---; grep -rln \\\"dispatchWorkflow\\\" .github/atomaton-runtime 2>/dev/null | head -3\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "As expected, this repository's deployed copies still have the old permissions; they arrive from a release application (the update machinery), which is the designed path — nothing more for an agent to do here.\n\nLet me check whether the deployed runtime exists at all (grep found nothing, maybe the path differs). Check .github/atomaton-runtime existence.\n\nActually not critical. The key statement: `.github/**` is an adoption of the release and lags `src/` until a release is applied. That's designed behaviour (conventions), not a defect of this fix.\n\nLet me quickly confirm the runtime path exists so my statement is accurate.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_21e73954-34dc-4946-bad2-44dc826cce00",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"scripts\\ntools\\n---\\n.github/atomaton-runtime/tools/mcp/github.ts\\n.github/atomaton-runtime/tools/mcp/atomaton.ts\\n.github/atomaton-runtime/scripts/validate_pull_request.ts\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":185}",
+      "tool_call_id": "chatcmpl-tool-8e86029379cb4469"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9c081579f3dda949",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"grep -rn \\\"dispatchWorkflow\\\" -A 12 .github/atomaton-runtime/tools/mcp/github.ts 2>/dev/null | grep -n \\\"token\\\" | head -8; echo \\\"--- bundled scripts use the adapter? ---\\\"; ls .github/atomaton-runtime/scripts | head -3; grep -c \\\"\\\" .github/atomaton-runtime/scripts/notify_new_release.ts 2>/dev/null\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"1:6735:function dispatchWorkflow(context, workflow, args = [], log = (m) => console.error(m), token = \\\"\\\") {\\n3:6737-  const { code, stdout, stderr } = token.trim() ? ghAs(token.trim(), ...argv) : gh(...argv);\\n15:8537:  if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log, d.token)) {\\n--- bundled scripts use the adapter? ---\\naggregate_sub_issues.ts\\nask_again.ts\\ncheck_ending.ts\\n1113\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":190}",
+      "tool_call_id": "chatcmpl-tool-9c081579f3dda949"
+    },
+    {
+      "role": "assistant",
+      "content": "All acceptance criteria hold on `main@b133a91`. Concluding the issue.\n\n\n\n",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-b0936a7f9cf706db",
+          "type": "function",
+          "function": {
+            "name": "request_close_issue",
+            "arguments": "{\"summary\": \"#655 の受け入れ条件は main の `b133a91` ですべて満たされています。新リリース通知からの dispatch も、更新が衝突したときの解決エージェント起動も、呼び出し元ワークフロー自身の `GITHUB_TOKEN` で走ります。`ATOMATON_UPDATE_TOKEN` は push・PR 作成・merge の identity だけを担い、dispatch の成否からは切り離されました。\\n\\n**根拠**\\n\\n<details><summary>根拠（呼び出し箇所、grep、生成された権限、テスト結果）</summary>\\n\\n- `src/entrypoints/machinery/notify_new_release.ts:636` が `dispatchUpdate(repo, 0)`、`src/entrypoints/machinery/update_atomaton.ts:636` が `dispatchUpdateConflictAgent(repo, prNumber, conflictAgent)` を呼びます。どちらもトークンを渡しません。\\n- `grep -rn \\\"token?:\\\" src --include=*.ts` は 0 件、`grep -rn \\\"{ token\\\" src/entrypoints/machinery/notify_new_release.ts src/entrypoints/machinery/update_atomaton.ts src/adapters/actions/` も 0 件です（受け入れ条件3）。\\n- `bun run synth` 後の `dist/.github/workflows/atomaton-new-release.yml:18-21` は `{contents: read, issues: write, actions: write}`、`atomaton-update.yml:21-26` は `{contents: read, issues: write, pull-requests: write, checks: read, actions: write}`。どちらにも `checks: write` はありません（条件4）。\\n- `bun run typecheck` は exit 0、`bun test` は `2671 pass` / `6 skip` / `0 fail`（208 files）。`new-release-notice.test.ts` の権限 assert、`notify_new_release.test.ts`、`update_atomaton.test.ts` はいずれもこの中で通っています（条件1・2）。\\n- `.github/workflows/release.yml:648` に `actions: write` があり、リリース適用経路（PR #660）も閉じています。条件5の記述は PR #657 の本文に残しています。\\n\\n</details>\\n\\n**確かめられなかったこと**\\n\\n- 実際の cron やリリースで 403 が消えたことは観測していません。確かめたのは、dispatch が ambient トークンで組み立てられることと、そのジョブが `actions: write` を宣言していることまでです。\\n- このリポジトリの配備済み `.github/atomaton-runtime/tools/mcp/github.ts:6735` はまだ `token = \\\"\\\"` を取る旧版で、`.github/workflows/atomaton-new-release.yml:18-21` も旧権限のままです。`src/**` の変更がリリースを経て適用されるまでの lag で、設計どおりの状態です。\\n- トークンが dispatch に戻らないことを固定するテストはありません。spread 経由で戻すと型検査も通るため、#655 の grep は手で回す必要があります。\\n\\n**次の一手**\\n\\n作業は完了しています。このリポジトリの実運行が新しくなるのは次のリリースを適用したときで、それは #655 の範囲外の通常運用です。\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Confirmed: this repository's *deployed* runtime (`.github/atomaton-runtime/`) still bundles the old `dispatchWorkflow` with the token parameter — as expected, it is release output that lags `src/` until a release is applied. That is the designed adoption lag (conventions), not a gap in this fix. Worth one line in the report.\n\nNow: all acceptance criteria are met on `main`. Conclude the issue with `request_close_issue`, using the summary as the comment.\n\nSummary content (Japanese, since the issue thread is Japanese; the human is @yuma-seno). The tool's `summary` is posted as the comment body and is the one place the conclusion is written; the parent's aggregation reads it too (this is a root/leaf issue under... issue #655 has no parent presumably; the reviewer was invoked from it).\n\nShould I include the report parts (4 parts)? The closing call's argument carries the report. Yes — the summary is the comment. I'll write the conclusion + evidence fold + what I could not establish + what's next.\n\nContent:\n\n結論: #655 の受け入れ条件は main の `b133a91` で満たされています。新リリース通知からの dispatch も update の衝突エージェント起動も、呼び出し元ワークフロー自身の `GITHUB_TOKEN` で走り、`ATOMATON_UPDATE_TOKEN` は push / PR / merge の identity だけを担います。\n\n根拠 (≤5 items):\n- `src/entrypoints/machinery/notify_new_release.ts:636` が `dispatchUpdate(repo, 0)`、`src/entrypoints/machinery/update_atomaton.ts:636` が `dispatchUpdateConflictAgent(repo, prNumber, conflictAgent)`。どちらも2/3引数で token を渡しません。\n- `grep -rn \"token?:\" src --include=*.ts` が 0 件、`grep -rn \"{ token\"` が3経路で0件。\n- `dist/.github/workflows/atomaton-new-release.yml:18-21` が `{contents: read, issues: write, actions: write}`、`atomaton-update.yml:21-26` が `{contents: read, issues: write, pull-requests: write, checks: read, actions: write}`（`bun run synth` 後）。どちらも `checks: write` は無し。\n- `bun run typecheck` exit 0、`bun test` は `2671 pass` / `6 skip` / `0 fail`（208 files、main@b133a91）。\n- `.github/workflows/release.yml:648` に `actions: write`（PR #660）。\n\n確かめられなかったこと:\n- 実リリース / 実 cron での 403 解消は観測していません。コード・権限・契約テストで確かめたのは「dispatch が ambient トークンで組み立てられ、そのジョブが `actions: write` を宣言している」ところまでです。\n- このリポジトリの配備済み `.github/atomaton-runtime/tools/mcp/github.ts:6735` はまだ `token = \"\"` を取る旧版で、`.github/workflows/atomaton-new-release.yml:18-21` も旧権限です。リリースを適用するまで、ここの実運行は旧版のまま（`src/**` → リリース → 適用、という設計どおりの lag）。\n- `dispatch` に token が戻らないことを固定するテストはありません。spread 経由なら型検査も通るため、#655 の grep は手で回すしかありません。\n\n次の一手: 作業は完了しています。次に必要なのはリリースの適用のみで、これは人の操作(#655 の範囲外)。\n\nHmm, \"次の一手\": who acts now. The issue work is done → say done. Maybe: このリポジトリで実際の dispatch が新しくなるのは次のリリースを適用したときで、それは別の運用。\n\nNo @mention needed? If nothing follows, \"say the work is done and stop\" — no call. Since request_close_issue is the ending call (it posts the comment and ends the session). And it's a tool, not a mention. Good — no person mention needed; the machinery informs.\n\nWait: should I mention @yuma-seno for the release application? That's normal operation, not a handed-off task. No call.\n\nLet me write the summary in Japanese, respecting the skill, and call request_close_issue.\n\nNote the tool description: \"Whether it closes now or asks the author to is this tool's decision\". Fine.\n\nKeep evidence in a `<details>` fold with a summary naming contents.\n\nLet me write it.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_948af09e-1ab3-4d6c-8960-a3df8c7f8145",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Issue #655 is concluded: your conclusion is on the issue. Nothing else is yours to do here.",
+      "tool_call_id": "chatcmpl-tool-b0936a7f9cf706db"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 11,
+      "event_count": 15,
       "session_number": "655",
-      "snapshot_hash": "cd3270d1265fc08c68c1e55910df25b8f7a74221b648ea5271894782e33839ff",
+      "snapshot_hash": "7772645fc5e5987cb26db9e29ccffbd479fcee833bec216244ae0b5858225081",
       "type": "issue",
       "version": 1
     }
@@ -3439,6 +3723,24 @@
         }
       },
       "started": "2026-11-28T11:46:47Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-28T11:58:07Z",
+      "ended_because": "completed",
+      "iterations": 7,
+      "loop_recoveries": 0,
+      "messages": 262,
+      "seconds": 159,
+      "server_calls": {
+        "atomaton_env": {
+          "request_close_issue": 1
+        },
+        "shell": {
+          "bash": 8
+        }
+      },
+      "started": "2026-11-28T11:55:28Z"
     }
   ]
 }
