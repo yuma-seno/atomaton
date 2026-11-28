@@ -34561,5 +34561,59 @@
         "started": "2026-11-28T15:29:02Z"
       }
     ]
+  },
+  {
+    "path": "sessions/pr-685/atomaton.json",
+    "agent": "atomaton",
+    "messages": 32,
+    "calls": 16,
+    "failed": 1,
+    "refused": 0,
+    "skills": [
+      "conventions",
+      "japanese"
+    ],
+    "reported": true,
+    "tools": {
+      "load_skill": 2,
+      "read": 4,
+      "bash": 3,
+      "glob": 1,
+      "grep": 3,
+      "edit": 1,
+      "commit_and_push": 1,
+      "check_merge_readiness": 1
+    },
+    "acts": {
+      "other": 2,
+      "edit": 1
+    },
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-28T17:31:13Z",
+        "ended_because": "completed",
+        "iterations": 10,
+        "loop_recoveries": 0,
+        "messages": 32,
+        "seconds": 331,
+        "server_calls": {
+          "files": {
+            "edit": 1,
+            "glob": 1,
+            "grep": 3,
+            "read": 4
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "commit_and_push": 1
+          },
+          "shell": {
+            "bash": 3
+          }
+        },
+        "started": "2026-11-28T17:25:42Z"
+      }
+    ]
   }
 ]
