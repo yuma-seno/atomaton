@@ -77,11 +77,6 @@ is decided by what the merge measured, not by a flag:
   conflict markers in those files, naming both sides. Nothing merges until
   someone resolves them: comment on that pull request and ask an agent, or edit
   the files yourself. The checks run on the resolved tree, and then it can merge.
-  One file is the exception, and it is the one every job reads: a collision on
-  `.github/atomaton/config.yaml` puts no marker in the tree, because a config
-  nobody can parse is a pull request whose checks cannot be planned and whose
-  runs cannot start. Both sides are in the pull request's body, your copy stays
-  in the tree, and it stops for you the same way.
 - **Upstream adds, removes or rewrites a path your tree stands differently on.**
   Not a collision, and no markers: the plan leaves that path as your tree has it
   and lists it, so the pull request stands and does not merge itself. Read it, and

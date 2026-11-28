@@ -32,21 +32,6 @@ function configPath(): string {
 let cached: AtomaConfig | undefined;
 
 /**
- * The line of a `git merge-file` collision in `text`, or null when there is none.
- *
- * A marker is the one thing in this file that no setting can survive: YAML's own
- * complaint about the line after `<<<<<<<` is `Multiline implicit key`, which names
- * a token and not a cause — the run that reads it learns nothing about what to do.
- * The update no longer writes markers here (`lib/update-apply.ts` says why), so what
- * this catches is a tree that arrived holding one: a person's half-resolved edit, or
- * a branch from before that rule. Its job is to say so in words the reader can act
- * on. #668 is the incident that made the message worth writing.
- */
-function conflictMarker(text: string): string | null {
-  return /^(?:<{7}|>{7})(?: |$)/m.exec(text)?.[0] ?? null;
-}
-
-/**
  * Load and parse the configuration, cached after the first read in a process.
  *
  * YAML rather than JSON so a setting can carry its reason beside it. `Bun.YAML`
@@ -56,15 +41,7 @@ function conflictMarker(text: string): string | null {
  */
 export function loadConfig(): AtomaConfig {
   if (!cached) {
-    const text = readFileSync(configPath(), "utf8");
-    const marker = conflictMarker(text);
-    if (marker !== null) {
-      throw new Error(
-        `${CONFIG_FILE} carries a conflict marker ('${marker.trim()} ...'): an update merge collided here and the file ` +
-          "was never resolved. Both sides are named in the markers — resolve them, then run this again.",
-      );
-    }
-    cached = Bun.YAML.parse(text) as AtomaConfig;
+    cached = Bun.YAML.parse(readFileSync(configPath(), "utf8")) as AtomaConfig;
   }
   return cached;
 }
@@ -169,12 +146,10 @@ export function getUpdateConflictAgent(): string {
  * Every other reader in this file throws on a config.yaml that exists and will not
  * parse, and that is right for a caller deciding what to do before anything is
  * written. The update is the one caller that reads the file AFTER it has applied the
- * plan, committed and pushed: a throw there lands between the push and the pull
- * request, so the pushed branch is all that survives — no pull request, no comment,
- * nobody told (#638). The apply no longer writes markers into this file, but a tree
- * can still arrive with a config nothing can parse — a person's edit in progress, a
- * release whose own copy does not parse — and none of those are a reason to lose the
- * pull request.
+ * plan, committed and pushed: when config.yaml is itself one of the paths both sides
+ * changed, what it reads carries conflict markers. A throw there lands between the
+ * push and the pull request, so the marker-carrying branch is all that survives — no
+ * pull request, no comment, nobody told (#638).
  *
  * So this answers instead of throwing. `readable: false` means the policy could not
  * be read, and the only honest use of it is what the default mode does: stop at the
